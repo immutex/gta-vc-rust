@@ -1,0 +1,16 @@
+# Game data and anything derived from it: never committed.
+gta-vc/
+vc-artifacts/
+
+# Build output
+/target
+*.profraw
+
+# Local overrides
+.env
+.env.*
+context/
+
+# Editor / OS
+.DS_Store
+*.pdb

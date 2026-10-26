@@ -1,0 +1,27 @@
+#!/bin/sh
+# Enforces Conventional Commits: <type>(<scope>): <subject>
+# Enable with: git config core.hooksPath .githooks
+
+msg_file=$1
+subject=$(head -n1 "$msg_file")
+
+case "$subject" in
+  "Merge "*|"Revert "*|"fixup!"*|"squash!"*) exit 0 ;;
+esac
+
+pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)\([a-z0-9][a-z0-9._/-]*\): .+'
+
+if ! printf '%s' "$subject" | grep -Eq "$pattern"; then
+  echo "commit-msg: subject must match '<type>(<scope>): <subject>'" >&2
+  echo "           types: feat fix docs style refactor perf test build ci chore revert" >&2
+  echo "           got:   $subject" >&2
+  exit 1
+fi
+
+length=$(printf '%s' "$subject" | wc -c)
+if [ "$length" -gt 73 ]; then
+  echo "commit-msg: subject is $((length - 1)) chars, limit is 72" >&2
+  exit 1
+fi
+
+exit 0

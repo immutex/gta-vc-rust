@@ -1,0 +1,13 @@
+[package]
+name = "vc_transport"
+description = "Locates a Grand Theft Auto: Vice City installation and opens its archives read-only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true
