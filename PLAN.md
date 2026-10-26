@@ -393,7 +393,7 @@ documented gap with the 90 MP3s and the SFX bank still working. `vc_director` dr
 | R10 | **Bevy 0.20 specifics**: WESL shader syntax replaced `#import`/`#ifdef`; instancing/batching assumptions and `bevy_pbr` custom-material hooks need confirming at M1 | Low–medium | Verify hooks at M1 with one material before scaling out; shaders authored in WESL from day one. |
 | R11 | **Impostor/HLOD authoring is new content work** — no distant-city LODs ship beyond the `lod*.dff` chain | Low–medium | Cook-time generation from existing LOD geometry; measure against 5.2's target. |
 | R12 | **No hardware GPU inside WSL** — the WSL driver exposes CUDA/D3D12 bits but no NVIDIA Vulkan ICD (only Mesa software `lvp` and other vendors' drivers) | **High** (blocks "run it and see") | Verified 2026-10-26. Rendering runs and is measured **on Windows native (D3D12)**; WSL stays the CPU-side cook/test/CI environment. `lvp` software Vulkan is available for headless image tests, but is not representative for perf. §16 |
-| R13 | **No Rust toolchain installed anywhere** (WSL `~/.cargo` empty; Windows side has only a stray `cargo-nextest.exe`), and Bevy 0.20 needs **Rust ≥ 1.97.1** | **High** (blocks everything) | First M0 action: install rustup on both sides, pin `rust-toolchain.toml`, verify ≥ 1.97.1. §16, §19 |
+| R13 | ~~**No Rust toolchain installed anywhere**~~ — resolved 2026-10-26: WSL has rustup with 1.99.1 pinned, Windows has rustup 1.29.1 | ~~High~~ Closed | Kept as a note: bump the pin deliberately when Bevy moves its MSRV |
 | R14 | **Bevy instancing requires identical mesh handles** — different mesh assets never share a batch, so a naive one-mesh-per-instance cook destroys the draw-call win | Medium | Cook dedupes geometries and maps IPL instances onto shared meshes; assert batch counts in the M2 perf harness. §20 |
 | R15 | **Two-glam-version trap** — Bevy 0.20 requires `glam ^0.33.2`; depending on latest (0.34) puts two glam versions in the graph and breaks type interop | Medium | Pin `glam = "0.33"` workspace-wide (verified requirement). §17 |
 | R16 | **CI cannot contain game-derived fixtures** — golden vectors, captured reference frames and census inputs all derive from copyrighted data | Medium | Synthetic fixtures in-repo for CI; every game-data test is local-only behind `VC_GAME_ROOT` and writes to ignored `vc-artifacts/`. Enforced by review + `.gitignore`. §18 |
@@ -553,8 +553,8 @@ move into `xtask` at M0 so the numbers are re-derived rather than trusted.
 | GPU | **NVIDIA RTX 5060, 8 GB VRAM**, driver 610.74 | reference machine for §6; 8 GB is the constraint to design against |
 | Vulkan in WSL | **no `nvidia_icd.json`** — only Mesa (`lvp` software, plus other vendors') | **no GPU rendering inside WSL** (R12) |
 | `/dev/dxg` | present | D3D12 passthrough exists, but wgpu's D3D12 backend runs on Windows, not on Linux |
-| Rust | **not installed in WSL** (`~/.cargo` empty) and **not installed on Windows** (only a stray `cargo-nextest.exe` in `C:\Users\mutex\.cargo\bin`) | blocking; M0 step 0 (R13) |
-| Build tools | `gcc`, `g++`, `make`, `git`, `python3`, `pkg-config` present; **`cmake` and `clang` missing** | install for the encoder backends (R17) |
+| Rust | **installed 2026-10-26** — WSL: `rustup` with 1.99.1 pinned in `rust-toolchain.toml`; Windows: rustup 1.29.1 installed via `winget` | M0 step 0 done (R13 closed) |
+| Build tools | `gcc`, `g++`, `make`, `git`, `python3`, `pkg-config` and `cargo-deny` 0.20.2 present; **`cmake` and `clang` still missing** (installation needs a sudo password) | only the encoder backends and the `librw` oracle need them; `ctt`'s pure-Rust `bc7enc` backend avoids both (R17) |
 | Disk | 96 GB free on `C:` (90% used), 954 GB free on the Linux ext4 root | build artifacts go on the Linux side |
 
 **Locked decisions:**
@@ -691,6 +691,13 @@ SPDX differs from what it actually links (R17).
 ## 19. M0 start-work checklist
 
 Ordered; steps 0–2 are prerequisites for everything else.
+
+**Progress, 2026-10-26:** steps 0, 1 and 2 are done — Rust 1.99.1 in WSL and rustup on Windows,
+`cargo-deny` installed, the repository initialised and committed with `.gitignore` guarding the game
+install, and the workspace skeleton (`vc_transport`, `xtask`, workspace lints, `deny.toml`) passing
+`cargo clippy -- -D warnings`, tests and `cargo deny check`. Remaining blocker: `cmake`/`clang`
+(needs a sudo password; only the encoder backends and the `librw` oracle need them).
+Next up: step 3, `xtask census`.
 
 | # | Task | Done when |
 |---|---|---|
