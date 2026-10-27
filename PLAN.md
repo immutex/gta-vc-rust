@@ -150,7 +150,7 @@ bodies are rigid atomic hierarchies animated by per-frame matrices) removes anot
 | IDE `objs` / `tobj` / `2dfx` | 3,789 object defs / 342 time-controlled objects / **1,069 2dfx entries** (31 area files + `maps/generic.ide`) | populated — 2dfx are lights/coronas/particles, i.e. **modernization material** (§5.7) |
 | IPL `cull` blocks | — | **empty in all 30 area files**; the cull zones are in **`data/maps/cull.ipl` (631 zones)** |
 | IPL `pick` | pickups | **empty in all 30 area files** — pickups are script-created ⇒ `vc_director` authors them |
-| **`data/maps/paths.ipl`** | **25,441 path nodes** | **the ground ped/vehicle navigation graph is shipped** — see §4.10 |
+| **`data/maps/paths.ipl`** | 1,957 blocks × 12 slots = 23,484, of which **14,732 points are in use** | the ground navigation graph, and the game loads it (`data/gta_vc.dat` line 83). Structure decoded, coordinate scale still a hypothesis — §4.11 |
 | `data/paths/` | `flight.dat` (336 nodes), `flight2.dat` (158), `flight3.dat` (485), `spath0.dat` (79) | flight and script paths |
 | `data/timecyc.dat` | **7 weather types × 24 hours**, 23 columns (ambient, ambient-object, directional, sky top/bottom, sun core/corona, shadow, light-shadow, pole-shadow, **FarClp**, fog, `LightOnGround`, 3 cloud colours, blur RGB, water RGBA) | populated — the master table for the modern atmosphere/sky model |
 | COL | 64 files (30 IMG + 34 loose), **4,245 records parsed** of an estimated 4,272 | one file, `models/coll/peds.col`, is a known gap (§4.10) |
@@ -236,7 +236,7 @@ from the first pass. Recorded because two of them changed the plan:
 
 | First-pass claim | Verified reality | Cause |
 |---|---|---|
-| "The ground nav graph is not shipped; the `path` blocks are empty" | **`data/maps/paths.ipl` holds 25,441 path nodes**, and `data/maps/cull.ipl` holds 631 cull zones | The first pass globbed `data/maps/*/*.ipl` — depth 2 only — missed the two depth-1 files, and generalised from the empty per-area blocks |
+| "The ground nav graph is not shipped; the `path` blocks are empty" | **`data/maps/paths.ipl` is the shipped nav graph** (§4.11), and `data/maps/cull.ipl` holds 631 cull zones | The first pass globbed `data/maps/*/*.ipl` — depth 2 only — missed the two depth-1 files, and generalised from the empty per-area blocks |
 | 6,506 geometries / 2,207,065 triangles / 2,819,169 vertices | **6,505 / 2,207,246 / 2,818,890**, declared == found, zero mismatches | The ad-hoc walk counted geometry sections anywhere in the tree rather than only under a geometry list |
 | 3,511 objects / 314 time objects / 985 2dfx / 4,272 COL records | **3,789 / 342 / 1,069 / 4,245 parsed** | Same depth-1 miss: `maps/generic.ide`, and the COL files under `models/coll` |
 | COL record layout understood | True for 33 of the 34 files | `models/coll/peds.col` does not fit the map layout — see below |
@@ -248,6 +248,28 @@ census's `files_with_extension` does that, and its counts are what §4 quotes.
 the map collision layout — its body is not `bounds + spheres + boxes + vertices + faces`. It is ped
 collision data, needed at M3, not at M0. The census reports it as unparsed and counts its records by
 magic marker so the total stays honest.
+
+### 4.11 The path graph: structure decoded, scale still a hypothesis
+
+Probe 2 (§15.2) took the graph apart. `data/maps/paths.ipl` is the only source — `data/gta_vc.dat`
+line 83 loads it, and the per-area `path` blocks really are empty.
+
+| Property | Verified |
+|---|---|
+| Block layout | **1,957 blocks**, each introduced by an unindented `<kind>, -1` header and holding **exactly 12** tab-indented points — 23,484 slots |
+| Block kinds | kind 0 ×1,140, kind 1 ×709, kind 2 ×108 |
+| Padding marker | **kind 0 means padding** — 8,752 slots, every one carrying a zero position. On a point in use, `next = -1` means *end of chain*, not an empty slot; conflating the two produced 1,915 false "dead links" before the probe caught it |
+| Occupancy | **14,732 points in use**, 8,752 padding slots |
+| Links | field 1 is the next point index within the block (`0..11`). 12,810 points link onward, 1,922 end a chain, and **every link resolves to a real point** (0 blocks with a dead link) — the model's own consistency check |
+| Positions | raw fixed point, not metres. At **1/16** the points in use span x[-2,080, 1,501], y[-1,844, 1,828], z[0, 266] — inside the world box of the 9,114 placed instances (x[-2,153, 1,283], y[-1,967, 1,714]), with a street-level median of ~10 m |
+
+The 1/16 scale is a **working hypothesis, not a decoded fact**, with three independent supports:
+containment in the instance box, a plausible elevation, and the arithmetic that a signed 16-bit value
+with four fractional bits spans exactly ±2,048 m — the extent of Vice City. `vc_paths::UNITS_PER_METRE`
+carries it, and every point keeps its raw value beside the derived position, so a correction stays cheap.
+
+Still open: fields 2, 6 and 7–11, and **how blocks interconnect** — links are intra-block only, so the
+cross-block structure must live in one of the undecoded fields. That is now M5's main unknown.
 
 ---
 
@@ -411,7 +433,7 @@ documented gap with the 90 MP3s and the SFX bank still working. `vc_director` dr
 | # | Risk | Severity | Mitigation |
 |---|---|---|---|
 | R1 | **AI port scope** — ped task/event AI, traffic, police, combat is the largest remaining subsystem, now that the mission VM is gone | **High** | Behaviour-level port on ECS with a budget; land it in stages (M5 peds → M6 traffic/police → M7 combat), each with its own gate. Numbers come from the shipped data files, only the implementation is new. |
-| R2 | **Path-graph semantics are undocumented** — the graph *is* shipped (`data/maps/paths.ipl`, 25,441 nodes) but its node/link/area fields and lane conventions are not described anywhere public | Medium | M0.5 probe: decode the node record layout and validate the graph by walking it (connectivity, one-way links, area ids). Downgraded from **High** on 2026-10-26: the first draft wrongly concluded the graph was absent (it globbed only depth-2 files; see §4.10). |
+| R2 | **How path blocks interconnect is undecoded** — the graph is shipped and its block/point/link structure is decoded (§4.11), but links are intra-block only and the coordinate scale is a hypothesis (1/16) rather than a decoded fact | Medium | M5 must either find the cross-block fields or build connectivity from proximity; `vc_paths` keeps raw values beside derived ones so a scale correction is cheap. Downgraded from **High** on 2026-10-26, when the file was first located. |
 | R3 | **Framerate-dependence retrofit** — the original's logic/timers are frame-coupled; VC is known to require its ~30 fps limiter | **High** | M0.5 probe to confirm timing sources; fixed-step core from M3 onward; D6 test (identical trajectory across render rates) as a hard gate, not a nice-to-have. Corroborated 2026-10-26: `reVC`'s public to-do list still carries "Fix physics for high FPS", so an independent project never resolved it either (§12). |
 | R4 | **Spawn/ambient policy was partly script-driven** (IPL `pick` and `cull` blocks are empty; pickups are script-created) | Medium | `vc_director` authors it; M0.5 estimates how much. Recorded in the fidelity ledger as authored, not ported. |
 | R5 | **Modern lighting can make 2002 art look wrong** (over-lit, plastic) | Medium | Prelit colours remain the base term; lighting is additive; keep a "period" toggle for A/B comparison against the original. |
@@ -582,8 +604,9 @@ move into `xtask` at M0 so the numbers are re-derived rather than trusted.
 ### 15.2 Open probes (M0.5)
 
 1. Install-version assertion — hash the census to pin 1.0 and detect 1.1/retail drift.
-2. **Path graph, now located** (`data/maps/paths.ipl`, §4.10): decode the node record layout — links,
-   area ids, lane conventions — and validate it by walking connectivity (R2).
+2. **Path graph cross-block links and coordinate scale** — the intra-block structure is decoded
+   (§4.11); what remains is which field carries the links *between* blocks, and whether 1/16 is the
+   right unit (R2).
 3. How much ambient/spawn policy was script-driven (R4).
 4. Framerate coupling: confirm which subsystems are frame-stepped in the original (R3).
 5. Full TXD raster-format histogram — how much of 182.6 MB is BC1 vs. needs decode.
