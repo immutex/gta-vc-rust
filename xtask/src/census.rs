@@ -57,6 +57,9 @@ mod expected {
     pub(super) const IDE_TIME_OBJECTS: u64 = 342;
     pub(super) const IDE_EFFECTS: u64 = 1069;
 
+    pub(super) const ARCHIVE_FINGERPRINT: &str =
+        "bf76407576847344e9a005dce07bfc309473ed103c1055be13e52bd7d9d56325";
+
     pub(super) const TIMECYC_WEATHERS: u64 = 7;
     pub(super) const TIMECYC_HOURS: u64 = 168;
 }
@@ -85,6 +88,7 @@ pub(crate) fn run(verify: bool, verbose: bool) -> Result<()> {
 struct Report {
     install: PathBuf,
     img_entries: usize,
+    fingerprint: String,
     duplicate_names: Vec<String>,
     by_extension: BTreeMap<String, Totals>,
     models: u64,
@@ -156,6 +160,7 @@ fn collect(root: &GameRoot, verbose: bool) -> Result<Report> {
     let mut report = Report {
         install: root.path().to_path_buf(),
         img_entries: archive.len(),
+        fingerprint: archive_fingerprint(&archive),
         duplicate_names: archive.duplicate_names(),
         by_extension: BTreeMap::new(),
         models: 0,
@@ -396,6 +401,23 @@ fn tally_placement(report: &mut Report, directory: &Path, verbose: bool) -> Resu
     Ok(())
 }
 
+/// Fingerprints the archive directory: names, offsets and lengths, in order.
+///
+/// This is the install's identity. A different build of the game changes it, and
+/// that is the point: the census refuses to measure an install it has not been
+/// asked to measure, rather than quietly reporting numbers from another release.
+fn archive_fingerprint(archive: &ImageArchive) -> String {
+    let mut hasher = blake3::Hasher::new();
+
+    for entry in archive.entries() {
+        hasher.update(entry.name().as_bytes());
+        hasher.update(&entry.byte_offset().to_le_bytes());
+        hasher.update(&entry.byte_len().to_le_bytes());
+    }
+
+    hasher.finalize().to_hex().to_string()
+}
+
 /// Reads the weather and lighting table.
 fn tally_timecycle(report: &mut Report, path: &Path) -> Result<()> {
     let text = read_text(path)?;
@@ -516,6 +538,7 @@ impl Report {
     fn print_archive(&self) {
         println!("install      {}", self.install.display());
         println!("img entries  {}", self.img_entries);
+        println!("fingerprint  {}", self.fingerprint);
         println!(
             "duplicates   {} {:?}",
             self.duplicate_names.len(),
@@ -796,6 +819,14 @@ impl Report {
             mismatches.push(format!(
                 "txd entries that did not parse: {}",
                 self.txd_skipped
+            ));
+        }
+
+        if self.fingerprint != expected::ARCHIVE_FINGERPRINT {
+            mismatches.push(format!(
+                "archive fingerprint: found {}, expected {} (a different install build must update this constant deliberately)",
+                self.fingerprint,
+                expected::ARCHIVE_FINGERPRINT
             ));
         }
 

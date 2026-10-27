@@ -499,7 +499,9 @@ documented gap with the 90 MP3s and the SFX bank still working. `vc_director` dr
 | R6 | **`.adf` radio** — proprietary, high-entropy, ~490 MB, no public codec | Medium | Time-boxed M0.5 spike. Failure ⇒ documented gap (iw4L precedent: report gaps, never synthesise). |
 | R7 | **DFF vertex encoding** — ~~undecoded~~ **decoded and byte-verified 2026-10-27** (§4.12): all 6,505 geometry structs are fully accounted for and the census gates on it | ~~Medium~~ Closed | Kept as a note: the surface-properties record is stamp-dependent, the one detail a future reader is likely to re-derive the hard way |
 | R8 | **Offline cook vs. semantic loss** | Medium | Cooked formats store material state words and vertex streams verbatim; glTF is a debug lens only. |
-| R9 | **Legal exposure** — Take-Two DMCA'd comparable projects (re3/reVC blocked, HTTP 451) | Medium | §12. |
+| R9 | **Install drift** — 1.0 versus 1.1, retail versus Steam, or a repack would change the assets and silently move every measurement | Low | The census fingerprints the archive directory and `--verify` fails on a mismatch, so it has to be updated deliberately. Legal exposure is handled in §12. |
+| R18 | **Legal exposure** — Take-Two DMCA'd comparable projects (`re3`/`reVC`, blocked since 2021) | Medium | Source-only distribution, no assets ever, clean-room discipline: §12. Unchanged by anything in M0. |
+| R19 | **24 paletted textures need expansion in the cook**, because wgpu has no indexed colour format (§4.6) | Low | Expand to `RGBA8` at cook time; it is 0.2% of the set so the memory cost is noise. |
 | R10 | **Bevy 0.20 specifics**: WESL shader syntax replaced `#import`/`#ifdef`; instancing/batching assumptions and `bevy_pbr` custom-material hooks need confirming at M1 | Low–medium | Verify hooks at M1 with one material before scaling out; shaders authored in WESL from day one. |
 | R11 | **Impostor/HLOD authoring is new content work** — no distant-city LODs ship beyond the `lod*.dff` chain | Low–medium | Cook-time generation from existing LOD geometry; measure against 5.2's target. |
 | R12 | **No hardware GPU inside WSL** — the WSL driver exposes CUDA/D3D12 bits but no NVIDIA Vulkan ICD (only Mesa software `lvp` and other vendors' drivers) | **High** (blocks "run it and see") | Verified 2026-10-26. Rendering runs and is measured **on Windows native (D3D12)**; WSL stays the CPU-side cook/test/CI environment. `lvp` software Vulkan is available for headless image tests, but is not representative for perf. §16 |
@@ -682,7 +684,10 @@ move into `xtask` at M0 so the numbers are re-derived rather than trusted.
 11. **`timecyc.dat`** — done 2026-10-27 (§4.13): all 168 rows decode, with the column order confirmed
     against the file's own header. What remains is deciding how the 150–2,000 far clip curve maps onto
     the extended view distance of §5.2.
-12. Bevy 0.20 custom-material + instancing hooks proven **in our own build** — the API shape is now
+12. **Install identity** — done 2026-10-27: the census fingerprints the IMG directory (names, offsets
+    and lengths, in order) and `--verify` fails when it changes, so a different build of the game
+    cannot be measured silently. This install is `bf764075…`, GTA VC PC 1.00.000.
+13. Bevy 0.20 custom-material + instancing hooks proven **in our own build** — the API shape is now
     verified from docs and shipped examples (§20), so the probe is a one-material smoke test, not a
     design question (R10).
 
