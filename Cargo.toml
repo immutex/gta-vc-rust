@@ -52,7 +52,9 @@ vc_col = { version = "0.1.0", path = "crates/vc_col" }
 vc_dff = { version = "0.1.0", path = "crates/vc_dff" }
 vc_ide = { version = "0.1.0", path = "crates/vc_ide" }
 vc_ipl = { version = "0.1.0", path = "crates/vc_ipl" }
+vc_game = { version = "0.1.0", path = "crates/vc_game" }
 vc_paths = { version = "0.1.0", path = "crates/vc_paths" }
+vc_render = { version = "0.1.0", path = "crates/vc_render" }
 vc_cook = { version = "0.1.0", path = "crates/vc_cook" }
 vc_timecyc = { version = "0.1.0", path = "crates/vc_timecyc" }
 vc_transport = { version = "0.1.0", path = "crates/vc_transport" }

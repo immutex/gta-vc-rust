@@ -387,6 +387,28 @@ and it was verified by round-tripping a synthetic scene in tests and the real mo
 layout remains available later if load time ever demands it, and the format word makes that swap
 visible rather than silent.
 
+### 4.19 The runtime slice: compile-verified, not yet run
+
+`vc_render` and `vc_game` exist. The `vc-rs` binary reads a `.vcck`, uploads every cooked mesh as a
+Bevy `Mesh`, uploads textures **in the format the cook produced** — `Bc1RgbaUnorm`, `Bc3RgbaUnorm`,
+`Rgba8UnormSrgb`, so block data is never decoded on the CPU — gives them one custom `Material`, and
+frames the result with a camera.
+
+**What is proven and what is not.** The Rust compiles under the full gate. The WESL fragment shader
+is *not* proven: shaders are only compiled when a pipeline is created, which needs a GPU, and this
+machine has no GPU path (§16). The first `cargo run -p vc_game` on Windows is therefore the real test
+of the shader, not a formality. That distinction is recorded here so a future session does not read
+"gate passes" as "the renderer works".
+
+```bash
+cargo xtask cook landstal.dff --txd generic.txd   # WSL: writes vc-artifacts/cooked/landstal.vcck
+cargo run -p vc_game                              # Windows: first pixels
+```
+
+Deliberately minimal for this step, each a named next increment rather than an omission: one material
+for the whole scene (per-triangle material ids are cooked and carried but not yet honoured), no prelit
+vertex colour in the shader, no lighting, no mip levels beyond level zero uploaded.
+
 ### 4.13 Timecyc: decoded, and the draw distance varies with weather
 
 `vc_timecyc` reads all 168 rows with no failures, and the column order the file's own header names

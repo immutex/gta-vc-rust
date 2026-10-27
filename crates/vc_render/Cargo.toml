@@ -1,0 +1,14 @@
+[package]
+name = "vc_render"
+description = "RenderWare-faithful materials and scene upload for the vc-rs runtime."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+bevy.workspace = true
+vc_cook.workspace = true
+
+[lints]
+workspace = true
