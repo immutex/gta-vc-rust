@@ -52,6 +52,7 @@ vc_col = { version = "0.1.0", path = "crates/vc_col" }
 vc_dff = { version = "0.1.0", path = "crates/vc_dff" }
 vc_ide = { version = "0.1.0", path = "crates/vc_ide" }
 vc_ipl = { version = "0.1.0", path = "crates/vc_ipl" }
+vc_paths = { version = "0.1.0", path = "crates/vc_paths" }
 vc_transport = { version = "0.1.0", path = "crates/vc_transport" }
 vc_txd = { version = "0.1.0", path = "crates/vc_txd" }
 

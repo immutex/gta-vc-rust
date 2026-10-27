@@ -42,6 +42,11 @@ mod expected {
     pub(super) const IPL_CULL_ZONES: u64 = 631;
     pub(super) const IPL_PATH_NODES: u64 = 25_441;
 
+    pub(super) const PATH_BLOCKS: u64 = 1957;
+    pub(super) const PATH_POINTS_IN_USE: u64 = 14_732;
+    pub(super) const PATH_EMPTY_SLOTS: u64 = 8752;
+    pub(super) const PATH_DEAD_LINK_BLOCKS: u64 = 0;
+
     pub(super) const IDE_FILES: usize = 32;
     pub(super) const IDE_OBJECTS: u64 = 3789;
     pub(super) const IDE_TIME_OBJECTS: u64 = 342;
@@ -104,6 +109,12 @@ struct Report {
     ipl_cull: u64,
     ipl_pickups: u64,
     ipl_path: u64,
+    path_blocks: u64,
+    path_points: u64,
+    path_empty_slots: u64,
+    path_broken_blocks: u64,
+    path_bounds: Option<([f32; 3], [f32; 3])>,
+    path_failures: u32,
     ide_files: usize,
     ide_objects: u64,
     ide_time_objects: u64,
@@ -154,6 +165,12 @@ fn collect(root: &GameRoot, verbose: bool) -> Result<Report> {
         ipl_cull: 0,
         ipl_pickups: 0,
         ipl_path: 0,
+        path_blocks: 0,
+        path_points: 0,
+        path_empty_slots: 0,
+        path_broken_blocks: 0,
+        path_bounds: None,
+        path_failures: 0,
         ide_files: 0,
         ide_objects: 0,
         ide_time_objects: 0,
@@ -289,6 +306,8 @@ fn tally_placement(report: &mut Report, directory: &Path, verbose: bool) -> Resu
         report.ipl_pickups += stats.pickups;
         report.ipl_path += stats.path_nodes;
 
+        tally_path_graph(report, &text);
+
         if verbose {
             println!(
                 "ipl {:<44} inst={:<6} cull={:<5} pick={:<4} path={:<6} blocks={}",
@@ -326,6 +345,29 @@ fn tally_placement(report: &mut Report, directory: &Path, verbose: bool) -> Resu
     }
 
     Ok(())
+}
+
+/// Accumulates the decoded path graph from one IPL file.
+fn tally_path_graph(report: &mut Report, text: &str) {
+    let Ok(paths) = vc_paths::Paths::parse(text) else {
+        report.path_failures += 1;
+
+        return;
+    };
+
+    report.path_blocks += paths.blocks.len() as u64;
+    report.path_points += paths.points_in_use() as u64;
+    report.path_empty_slots += paths.empty_slots() as u64;
+    report.path_broken_blocks += paths.blocks_with_dead_links() as u64;
+
+    if let Some((min, max)) = paths.bounds_in_metres() {
+        let (current_min, current_max) = report.path_bounds.unwrap_or((min, max));
+
+        report.path_bounds = Some((
+            [0, 1, 2].map(|axis| current_min[axis].min(min[axis])),
+            [0, 1, 2].map(|axis| current_max[axis].max(max[axis])),
+        ));
+    }
 }
 
 fn file_label(report: &Report, path: &Path) -> String {
@@ -467,7 +509,21 @@ impl Report {
         println!("  instances         {}", self.ipl_instances);
         println!("  cull zones        {}", self.ipl_cull);
         println!("  pickups           {}", self.ipl_pickups);
-        println!("  path nodes        {}", self.ipl_path);
+        println!("  path lines        {}", self.ipl_path);
+        println!("  path blocks       {}", self.path_blocks);
+        println!("  points in use     {}", self.path_points);
+        println!("  empty slots       {}", self.path_empty_slots);
+        println!("  blocks w/ dead    {}", self.path_broken_blocks);
+        println!("  path failures     {}", self.path_failures);
+
+        if let Some((min, max)) = self.path_bounds {
+            let [min_x, min_y, min_z] = min;
+            let [max_x, max_y, max_z] = max;
+
+            println!(
+                "  graph bounds m    x[{min_x:.0},{max_x:.0}] y[{min_y:.0},{max_y:.0}] z[{min_z:.0},{max_z:.0}]"
+            );
+        }
         println!("  ide files         {}", self.ide_files);
         println!("  objects           {}", self.ide_objects);
         println!("  time objects      {}", self.ide_time_objects);
@@ -475,7 +531,11 @@ impl Report {
         println!("  path nodes        {}", self.ide_path);
     }
 
-    fn expected_checks(&self) -> [(&'static str, u64, u64); 26] {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "a flat table of one assertion per measured total; splitting it would only relocate the data"
+    )]
+    fn expected_checks(&self) -> [(&'static str, u64, u64); 31] {
         [
             (
                 "img entries",
@@ -550,7 +610,24 @@ impl Report {
             ),
             ("ipl instances", self.ipl_instances, expected::IPL_INSTANCES),
             ("ipl cull zones", self.ipl_cull, expected::IPL_CULL_ZONES),
-            ("ipl path nodes", self.ipl_path, expected::IPL_PATH_NODES),
+            ("ipl path lines", self.ipl_path, expected::IPL_PATH_NODES),
+            ("path blocks", self.path_blocks, expected::PATH_BLOCKS),
+            (
+                "path points in use",
+                self.path_points,
+                expected::PATH_POINTS_IN_USE,
+            ),
+            (
+                "path empty slots",
+                self.path_empty_slots,
+                expected::PATH_EMPTY_SLOTS,
+            ),
+            (
+                "path blocks with dead links",
+                self.path_broken_blocks,
+                expected::PATH_DEAD_LINK_BLOCKS,
+            ),
+            ("path parse failures", u64::from(self.path_failures), 0),
             (
                 "ide files",
                 self.ide_files as u64,

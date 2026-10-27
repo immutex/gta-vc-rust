@@ -1,0 +1,13 @@
+[package]
+name = "vc_paths"
+description = "Reader for the Vice City path graph (data/maps/paths.ipl)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true
