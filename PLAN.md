@@ -221,10 +221,19 @@ mips, for 7.5% of the set rather than none. Two consequences for the cook:
 
 ### 4.7 Audio
 
-- `sfx.RAW` (340 MB) + `sfx.SDT` (199 KB offset/description table) — the SFX bank; codec to confirm.
+- `sfx.RAW` (340 MB) + `sfx.SDT` (199 KB table) — the SFX bank. **The samples are 16-bit PCM**,
+  settled by measurement rather than assumption: adjacent-sample correlation over the first 4 MB is
+  **0.80** as 16-bit words against **0.04** as 8-bit bytes, which only monotone 16-bit audio produces.
+  The `sfx.SDT` table layout is still open — it does not read as a plain array of `(offset, length)`
+  pairs, because a fifth of the slots carry `0xFFFFFFFF` sentinels and the offsets are not monotone.
 - 1,120 loose WAV (PCM) + 90 MP3 (ambience/cutscene-adjacent music) — decodable today.
-- **9 `.adf` radio stations**, 41–74 MB each (~490 MB), high-entropy, proprietary, undocumented →
-  the one item that may end as a documented gap (R6).
+- **9 `.adf` radio stations**, 41–74 MB each (~490 MB). Probe 7 characterised them: every file starts
+  with a 4-byte magic, and there are **two variants — `ddd9b24e` for the seven music stations and
+  `ddd1aa4e` for the two talk stations** (K-Chat and VCPR). Entropy is 7.96–7.97 bits per byte, so the
+  payload is compressed or lightly obfuscated, and there are a handful of **`ID3` tags and ~500 MP3
+  frame syncs per MB** inside — enough to say there is MPEG audio in there, far too few to read it as
+  plain concatenated MP3. This is a scoped reverse-engineering job on the container, not a dead end,
+  but it stays the one item that may end as a documented gap (R6).
 - `mss/mss32.dll`, `.m3d`, `Reverb3.flt` are Miles Sound System artefacts; we do not emulate them.
 
 ### 4.8 Correction from the first draft
@@ -511,7 +520,7 @@ documented gap with the 90 MP3s and the SFX bank still working. `vc_director` dr
 | R3 | **Framerate-dependence retrofit** — the original's logic/timers are frame-coupled; VC is known to require its ~30 fps limiter | **High** | M0.5 probe to confirm timing sources; fixed-step core from M3 onward; D6 test (identical trajectory across render rates) as a hard gate, not a nice-to-have. Corroborated 2026-10-26: `reVC`'s public to-do list still carries "Fix physics for high FPS", so an independent project never resolved it either (§12). |
 | R4 | **Spawn/ambient policy was partly script-driven** (IPL `pick` and `cull` blocks are empty; pickups are script-created) | Medium | `vc_director` authors it; M0.5 estimates how much. Recorded in the fidelity ledger as authored, not ported. |
 | R5 | **Modern lighting can make 2002 art look wrong** (over-lit, plastic) | Medium | Prelit colours remain the base term; lighting is additive; keep a "period" toggle for A/B comparison against the original. |
-| R6 | **`.adf` radio** — proprietary, high-entropy, ~490 MB, no public codec | Medium | Time-boxed M0.5 spike. Failure ⇒ documented gap (iw4L precedent: report gaps, never synthesise). |
+| R6 | **`.adf` radio** — two container magics, 7.97-bit entropy, embedded ID3, ~490 MB | Medium | Probe 7 (§4.7) narrowed it to a container problem with MPEG audio inside, which is progress but not a decoder. Failure ⇒ documented gap (iw4L precedent: report gaps, never synthesise). |
 | R7 | **DFF vertex encoding** — ~~undecoded~~ **decoded and byte-verified 2026-10-27** (§4.12): all 6,505 geometry structs are fully accounted for and the census gates on it | ~~Medium~~ Closed | Kept as a note: the surface-properties record is stamp-dependent, the one detail a future reader is likely to re-derive the hard way |
 | R8 | **Offline cook vs. semantic loss** | Medium | Cooked formats store material state words and vertex streams verbatim; glTF is a debug lens only. |
 | R9 | **Install drift** — 1.0 versus 1.1, retail versus Steam, or a repack would change the assets and silently move every measurement | Low | The census fingerprints the archive directory and `--verify` fails on a mismatch, so it has to be updated deliberately. Legal exposure is handled in §12. |
@@ -689,7 +698,9 @@ move into `xtask` at M0 so the numbers are re-derived rather than trusted.
 6. **DFF geometry layout** — done 2026-10-27 (§4.12): decoded, byte-verified on all 6,505 geometries
    and gated by the census. What remains is the `0x50E` / `0x105` extension chunks, which are optional
    extras rather than part of the vertex data.
-7. `sfx.RAW` codec (PCM vs. ADPCM) and the `.adf` container verdict (R6).
+7. **Audio** — partly done 2026-10-27 (§4.7): `sfx.RAW` is 16-bit PCM, and the `.adf` container has
+    two magics with MPEG audio inside. Still open: the `sfx.SDT` table layout, and the `.adf` container
+    header itself (R6).
 8. **`cull.ipl`** — done 2026-10-27 (§4.14): 631 boxes with their anchor semantics resolved. What
     remains is the binary `Cullzone.dat` beside it, and whether the two hold the same zones.
 9. `models/coll/peds.col` body layout — the one collision file that does not match the map format
