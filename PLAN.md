@@ -305,6 +305,24 @@ corner:
 Consequence for M2: culling uses the corners, which are unambiguous, and treats `Cullzone.dat` (the
 155 KB binary beside it) as a separate open question — the two may not carry the same zones.
 
+### 4.15 Spawn policy: what the data gives us, and what it does not
+
+Probe 3 asked how much of the ambient spawning was script-driven. Split by actor:
+
+| Actor | Source | Verdict |
+|---|---|---|
+| **Pedestrians** | **`data/pedgrp.dat` is data-driven**: its own header says it "contains the list of ped groups for each zone. Each ped group should contain 16 ped type names", and the file holds about 70 such groups | Spawning per zone needs **no script**: zone from `info.zon`, group from `pedgrp.dat`, stats from `pedstats.dat`, relationships from `ped.dat` |
+| **Vehicles** | `data/default.ide` defines the **car classes** (`NORMAL_CAR 1`, `POOR_FAMILY_CAR 2`, `RICH_FAMILY_CAR 4`, …) but no file assigns a class mix or density to a zone | The **density and mix were scripted or engine-side**, so `vc_director` must author them — this is the part of R4 that survives |
+| **Pickups** | IPL `pick` blocks are empty (already known) | Script-created; authored by the director |
+
+So the answer to R4 is narrower than feared: peds are data-driven end to end, and only vehicle density needs authoring.
+
+### 4.16 Cullzone.dat: the binary mirror of cull.ipl
+
+`data/Cullzone.dat` is the same 631 zones in binary. The first non-zero byte sits at offset 24,580 — a zeroed prefix, not a header — and the floats from there reproduce the first IPL record exactly (`-357.922`, `-335.663`, `1058.65`, `1106.74`, `6.47`), but ordered as **axis pairs** `(min_x, max_x) (min_y, max_y) (min_z, …)` instead of corner triples, preceded by a `u32` that is 76 on the first record.
+
+That makes the file **redundant for us**: the decoded text form is easier to verify (§4.14), so M2 reads `cull.ipl` and this file stays a cross-check rather than a dependency.
+
 ### 4.13 Timecyc: decoded, and the draw distance varies with weather
 
 `vc_timecyc` reads all 168 rows with no failures, and the column order the file's own header names
@@ -692,7 +710,8 @@ move into `xtask` at M0 so the numbers are re-derived rather than trusted.
 2. **Path graph cross-block links and coordinate scale** — the intra-block structure is decoded
    (§4.11); what remains is which field carries the links *between* blocks, and whether 1/16 is the
    right unit (R2).
-3. How much ambient/spawn policy was script-driven (R4).
+3. **Spawn policy** — answered 2026-10-27 (§4.15): `pedgrp.dat` is per-zone ped groups, so peds need no
+   script; `default.ide` carries car classes but no density, so only vehicle mix is authored.
 4. Framerate coupling: confirm which subsystems are frame-stepped in the original (R3).
 5. Full TXD raster-format histogram — how much of 182.6 MB is BC1 vs. needs decode.
 6. **DFF geometry layout** — done 2026-10-27 (§4.12): decoded, byte-verified on all 6,505 geometries
@@ -701,13 +720,13 @@ move into `xtask` at M0 so the numbers are re-derived rather than trusted.
 7. **Audio** — partly done 2026-10-27 (§4.7): `sfx.RAW` is 16-bit PCM, and the `.adf` container has
     two magics with MPEG audio inside. Still open: the `sfx.SDT` table layout, and the `.adf` container
     header itself (R6).
-8. **`cull.ipl`** — done 2026-10-27 (§4.14): 631 boxes with their anchor semantics resolved. What
-    remains is the binary `Cullzone.dat` beside it, and whether the two hold the same zones.
-9. `models/coll/peds.col` body layout — the one collision file that does not match the map format
-   (§4.10). Needed before M3, so it can wait, but it must not be forgotten. Its oracle route is
-   closed (§10.1: `librw` has no COL reader, `librwgta` is unlicensed), so it needs accounting
-   forensics like the rest: the record declares 732 bytes, spheres sit at the expected offset, and
-   the four list counts that follow do not add up, which points at ped-specific list ordering.
+8. **Cull zones** — done 2026-10-27 (§4.14, §4.16): 631 boxes decoded, and the binary
+    `Cullzone.dat` is confirmed to be the same zones in a different field order, so it is redundant.
+9. **`models/coll/peds.col`** — scoped 2026-10-27, not decoded: it holds **8 records** (sizes 404 to
+   1,360 bytes), not the ~30 that a marker count suggested, and no header/bounds/list combination —
+   including every permutation of the four list orders and sphere strides of 16, 20, 24 and 28 —
+   consumes a record exactly. The oracle route is closed (§10.1), so this needs either accounting
+   forensics with more time or a ped-collision-specific approach at M5. It is 8 models out of 2,100+.
 10. **Texture formats** — done 2026-10-27 (§4.6): all 11,997 descriptors are byte-exact, split
     10,824 BC1 / 1,149 BC2-or-BC3 / 24 paletted, with 895 carrying mip chains. What remains is
     separating DXT3 from DXT5, which the byte budget cannot do — a decoder-side question for M1.
@@ -773,7 +792,7 @@ only (D4), enforced by `cargo-deny` (§18).
 | `encase` | 0.13.0 | **MIT-0** | WGSL uniform layout — add `MIT-0` to the deny allow-list or the build fails |
 | `parry3d` | 0.31.1 (2026-09-18) | Apache-2.0 | BVH (QBVH) + ray/point/contact queries for collision lookups; **no physics engine** |
 | `cpal` | 0.18.2 (2026-08-16) | Apache-2.0 | audio output. **Keep `asio` and `jack` features OFF** (Steinberg's account-gated SDK; libjack is LGPL) |
-| `symphonia` | 0.6.1 (2026-08-13) | MPL-2.0 | MP3/WAV decode. `default-features = false, features = ["mp3","wav","pcm","opt-simd"]` — `wav`/`pcm` are in default, **`mp3` is not** |
+| `symphonia` | 0.6.1 (2026-08-13) | MPL-2.0 | MP3/WAV decode. `default-features = false, features = ["mp3","wav","pcm","adpcm","opt-simd"]` — `wav`/`pcm` are in default, **`mp3` is not**, and **`adpcm` is required** because 372 of the 1,120 loose WAVs are IMA ADPCM rather than PCM (§4.7) |
 | `rtrb` | 0.4.1 (2026-10-25) | MIT OR Apache-2.0 | wait-free SPSC ring buffer for the realtime audio thread (`ringbuf` 0.5.3 is the ergonomic alternative) |
 | `serde` + `toml` | 1.0.229 / 1.1.8 | MIT OR Apache-2.0 | settings and the config surface |
 | `postcard` | 1.1.3 (2025-07-24) | MIT OR Apache-2.0 | save files (schema-driven, active) |
