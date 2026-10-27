@@ -87,6 +87,10 @@ struct Report {
     vertices: u64,
     morph_targets: u64,
     dff_failures: u32,
+    geometry_layouts_exact: u32,
+    geometry_layout_failures: u32,
+    prelit_geometries: u32,
+    normal_geometries: u32,
     dff_error_samples: Vec<String>,
     dictionaries: u32,
     textures: u64,
@@ -143,6 +147,10 @@ fn collect(root: &GameRoot, verbose: bool) -> Result<Report> {
         vertices: 0,
         morph_targets: 0,
         dff_failures: 0,
+        geometry_layouts_exact: 0,
+        geometry_layout_failures: 0,
+        prelit_geometries: 0,
+        normal_geometries: 0,
         dff_error_samples: Vec::new(),
         dictionaries: 0,
         textures: 0,
@@ -226,6 +234,10 @@ fn tally_dff(name: &str, data: &[u8], report: &mut Report) {
             report.triangles += clump.triangles;
             report.vertices += clump.vertices;
             report.morph_targets += clump.morph_targets;
+            report.geometry_layouts_exact += clump.layouts_exact;
+            report.geometry_layout_failures += clump.layout_failures;
+            report.prelit_geometries += clump.prelit_geometries;
+            report.normal_geometries += clump.normal_geometries;
 
             if !clump.geometry_count_matches() {
                 report.geometry_count_mismatches += 1;
@@ -469,6 +481,10 @@ impl Report {
         println!("  triangles         {}", self.triangles);
         println!("  vertices          {}", self.vertices);
         println!("  morph targets     {}", self.morph_targets);
+        println!("  layouts exact     {}", self.geometry_layouts_exact);
+        println!("  layout failures   {}", self.geometry_layout_failures);
+        println!("  prelit            {}", self.prelit_geometries);
+        println!("  with normals      {}", self.normal_geometries);
         println!("  dff parse errors  {}", self.dff_failures);
 
         for sample in &self.dff_error_samples {
@@ -535,7 +551,7 @@ impl Report {
         clippy::too_many_lines,
         reason = "a flat table of one assertion per measured total; splitting it would only relocate the data"
     )]
-    fn expected_checks(&self) -> [(&'static str, u64, u64); 31] {
+    fn expected_checks(&self) -> [(&'static str, u64, u64); 33] {
         [
             (
                 "img entries",
@@ -580,6 +596,16 @@ impl Report {
                 "dff parse errors",
                 u64::from(self.dff_failures),
                 u64::from(expected::DFF_FAILURES),
+            ),
+            (
+                "geometry layouts exact",
+                u64::from(self.geometry_layouts_exact),
+                expected::GEOMETRIES,
+            ),
+            (
+                "geometry layout failures",
+                u64::from(self.geometry_layout_failures),
+                0,
             ),
             (
                 "txd dictionaries",
