@@ -1,8 +1,8 @@
 //! Locates a Grand Theft Auto: Vice City installation.
 //!
-//! This crate resolves the installation root and validates that it looks like
-//! Vice City 1.0. It does not open, parse or mutate any game file: archive and
-//! format readers live in their own crates.
+//! This crate resolves the installation root, validates that it looks like Vice
+//! City 1.0, and maps the IMG archive read-only. It does not interpret the
+//! formats inside the archive: those have a crate each.
 //!
 //! # Examples
 //!
@@ -19,10 +19,14 @@
     deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
+pub mod img;
+
 use std::env;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
+
+pub use img::{ImageArchive, ImgEntry};
 
 /// Environment variable holding the installation root.
 pub const GAME_ROOT_ENV: &str = "VC_GAME_ROOT";
@@ -79,7 +83,7 @@ impl GameRoot {
     }
 }
 
-/// Failures while locating an installation.
+/// Failures while locating an installation or reading its archives.
 #[derive(Debug, Error)]
 pub enum TransportError {
     /// The directory is missing the files a Vice City installation must have.
@@ -87,6 +91,37 @@ pub enum TransportError {
     NotAnInstall {
         /// The rejected path.
         path: PathBuf,
+    },
+    /// An IMG archive has no sibling directory beside it.
+    #[error("`{}` is missing; an IMG archive needs its sibling directory", path.display())]
+    MissingDirectory {
+        /// Expected directory path.
+        path: PathBuf,
+    },
+    /// A file could not be read.
+    #[error("failed to read `{}`", path.display())]
+    Io {
+        /// The offending path.
+        path: PathBuf,
+        /// Underlying error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// An entry index is past the end of the directory.
+    #[error("entry index {index} is out of range: the directory holds {entries} entries")]
+    NoSuchEntry {
+        /// Requested index.
+        index: usize,
+        /// Number of entries.
+        entries: usize,
+    },
+    /// An entry points past the end of the image.
+    #[error("entry {index} (`{name}`) points outside the image")]
+    EntryOutOfRange {
+        /// Entry index.
+        index: usize,
+        /// Entry name.
+        name: String,
     },
 }
 
