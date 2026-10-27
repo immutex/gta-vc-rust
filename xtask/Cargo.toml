@@ -11,5 +11,13 @@ publish = false
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive"] }
 
+rw_stream.workspace = true
+vc_col.workspace = true
+vc_dff.workspace = true
+vc_ide.workspace = true
+vc_ipl.workspace = true
+vc_transport.workspace = true
+vc_txd.workspace = true
+
 [lints]
 workspace = true

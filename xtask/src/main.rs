@@ -5,6 +5,9 @@
     deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
+mod census;
+mod dump;
+
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
@@ -26,13 +29,25 @@ enum Cmd {
         /// Fail when the install does not match the totals in PLAN.md.
         #[arg(long)]
         verify: bool,
+        /// Print per-file detail for the text formats.
+        #[arg(long)]
+        verbose: bool,
+    },
+    /// Print the `RenderWare` section tree of a file or archive entry.
+    Dump {
+        /// A file path, or `img:<name>` to read an entry from `models/gta3.img`.
+        target: String,
+        /// Deepest level to print.
+        #[arg(long, default_value_t = 4)]
+        depth: usize,
     },
 }
 
 fn main() -> Result<()> {
     match Cli::parse().command {
         Cmd::Check => check(),
-        Cmd::Census { verify } => census(verify),
+        Cmd::Census { verify, verbose } => census::run(verify, verbose),
+        Cmd::Dump { target, depth } => dump::run(&target, depth),
     }
 }
 
@@ -54,12 +69,6 @@ fn check() -> Result<()> {
     run("cargo", &["deny", "check"])?;
 
     Ok(())
-}
-
-fn census(verify: bool) -> Result<()> {
-    let _ = verify;
-
-    bail!("census is not implemented yet; it lands in M0 step 3 (PLAN.md section 19)")
 }
 
 fn run(program: &str, args: &[&str]) -> Result<()> {
