@@ -17,6 +17,7 @@ vc_dff.workspace = true
 vc_ide.workspace = true
 vc_ipl.workspace = true
 vc_paths.workspace = true
+vc_timecyc.workspace = true
 vc_transport.workspace = true
 vc_txd.workspace = true
 

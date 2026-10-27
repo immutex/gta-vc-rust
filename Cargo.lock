@@ -242,6 +242,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vc_timecyc"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "vc_transport"
 version = "0.1.0"
 dependencies = [
@@ -284,6 +291,7 @@ dependencies = [
  "vc_ide",
  "vc_ipl",
  "vc_paths",
+ "vc_timecyc",
  "vc_transport",
  "vc_txd",
 ]

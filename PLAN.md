@@ -152,7 +152,7 @@ bodies are rigid atomic hierarchies animated by per-frame matrices) removes anot
 | IPL `pick` | pickups | **empty in all 30 area files** — pickups are script-created ⇒ `vc_director` authors them |
 | **`data/maps/paths.ipl`** | 1,957 blocks × 12 slots = 23,484, of which **14,732 points are in use** | the ground navigation graph, and the game loads it (`data/gta_vc.dat` line 83). Structure decoded, coordinate scale still a hypothesis — §4.11 |
 | `data/paths/` | `flight.dat` (336 nodes), `flight2.dat` (158), `flight3.dat` (485), `spath0.dat` (79) | flight and script paths |
-| `data/timecyc.dat` | **7 weather types × 24 hours**, 23 columns (ambient, ambient-object, directional, sky top/bottom, sun core/corona, shadow, light-shadow, pole-shadow, **FarClp**, fog, `LightOnGround`, 3 cloud colours, blur RGB, water RGBA) | populated — the master table for the modern atmosphere/sky model |
+| `data/timecyc.dat` | **7 weather types × 24 hours = 168 rows**, 52 values in 23 columns (ambient, object-ambient, building-ambient, directional, sky top/bottom, sun core/corona, shadow, light-shadow, pole-shadow, **FarClp**, fog, `LightOnGround`, 3 cloud colours, blur RGB, water RGBA) | decoded (§4.13) — the master table for the modern atmosphere/sky model |
 | COL | 64 files (30 IMG + 34 loose), **4,245 records parsed** of an estimated 4,272 | one file, `models/coll/peds.col`, is a known gap (§4.10) |
 | `Cullzone.dat` / `Cullzoneempty.dat` | 50 zones (binary) | format probe at M0.5 |
 
@@ -280,6 +280,22 @@ carries it, and every point keeps its raw value beside the derived position, so 
 
 Still open: fields 2, 6 and 7–11, and **how blocks interconnect** — links are intra-block only, so the
 cross-block structure must live in one of the undecoded fields. That is now M5's main unknown.
+
+### 4.13 Timecyc: decoded, and the draw distance varies with weather
+
+`vc_timecyc` reads all 168 rows with no failures, and the column order the file's own header names
+accounts for exactly the 52 values each row carries — so the parse is self-checking rather than
+guessed. Two things fall out of it that matter to §5.2:
+
+- **The far clip plane is not a constant.** It runs from **150** units in the heaviest weather to
+  **2,000** in clear sun. The original does not merely fog away a fixed distance; the fog *is* the
+  weather, so extending the view has to preserve that curve rather than flatten it.
+- Elevation, cloud, water and blur colours are all per-hour, which is what makes the modern
+  atmosphere able to stay recognisably Vice City while the renderer underneath is new.
+
+One parsing trap worth recording: every weather section repeats the column-name header as a `//`
+comment, so a parser that treats any `//` line as a section marker sees 7 real weather types plus
+~200 phantom ones. Only a run of four or more slashes introduces a section.
 
 ### 4.12 DFF geometry layout: decoded and byte-verified
 
@@ -663,7 +679,9 @@ move into `xtask` at M0 so the numbers are re-derived rather than trusted.
 10. **Texture formats** — done 2026-10-27 (§4.6): all 11,997 descriptors are byte-exact, split
     10,824 BC1 / 1,149 BC2-or-BC3 / 24 paletted, with 895 carrying mip chains. What remains is
     separating DXT3 from DXT5, which the byte budget cannot do — a decoder-side question for M1.
-11. `timecyc.dat` column semantics per weather, including `LightOnGround` and the cloud/blur columns.
+11. **`timecyc.dat`** — done 2026-10-27 (§4.13): all 168 rows decode, with the column order confirmed
+    against the file's own header. What remains is deciding how the 150–2,000 far clip curve maps onto
+    the extended view distance of §5.2.
 12. Bevy 0.20 custom-material + instancing hooks proven **in our own build** — the API shape is now
     verified from docs and shipped examples (§20), so the probe is a one-material smoke test, not a
     design question (R10).

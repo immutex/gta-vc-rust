@@ -56,6 +56,9 @@ mod expected {
     pub(super) const IDE_OBJECTS: u64 = 3789;
     pub(super) const IDE_TIME_OBJECTS: u64 = 342;
     pub(super) const IDE_EFFECTS: u64 = 1069;
+
+    pub(super) const TIMECYC_WEATHERS: u64 = 7;
+    pub(super) const TIMECYC_HOURS: u64 = 168;
 }
 
 /// Records a mismatch when `found` differs from `want`.
@@ -135,6 +138,11 @@ struct Report {
     ide_time_objects: u64,
     ide_effects: u64,
     ide_path: u64,
+    timecyc_weathers: u64,
+    timecyc_hours: u64,
+    timecyc_far_clip_min: f32,
+    timecyc_far_clip_max: f32,
+    timecyc_failures: u32,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -201,12 +209,18 @@ fn collect(root: &GameRoot, verbose: bool) -> Result<Report> {
         ide_time_objects: 0,
         ide_effects: 0,
         ide_path: 0,
+        timecyc_weathers: 0,
+        timecyc_hours: 0,
+        timecyc_far_clip_min: 0.0,
+        timecyc_far_clip_max: 0.0,
+        timecyc_failures: 0,
     };
 
     tally_archive(&archive, &mut report)?;
     tally_collision_files(&mut report, &root.path().join("data/maps"))?;
     tally_collision_files(&mut report, &root.path().join("models/coll"))?;
     tally_placement(&mut report, &root.path().join("data/maps"), verbose)?;
+    tally_timecycle(&mut report, &root.path().join("data/timecyc.dat"))?;
 
     Ok(report)
 }
@@ -382,6 +396,27 @@ fn tally_placement(report: &mut Report, directory: &Path, verbose: bool) -> Resu
     Ok(())
 }
 
+/// Reads the weather and lighting table.
+fn tally_timecycle(report: &mut Report, path: &Path) -> Result<()> {
+    let text = read_text(path)?;
+
+    let Ok(table) = vc_timecyc::Timecycle::parse(&text) else {
+        report.timecyc_failures += 1;
+
+        return Ok(());
+    };
+
+    report.timecyc_weathers = table.weathers.len() as u64;
+    report.timecyc_hours = table.hours().count() as u64;
+
+    if let Some((min, max)) = table.far_clip_range() {
+        report.timecyc_far_clip_min = min;
+        report.timecyc_far_clip_max = max;
+    }
+
+    Ok(())
+}
+
 /// Accumulates the decoded path graph from one IPL file.
 fn tally_path_graph(report: &mut Report, text: &str) {
     let Ok(paths) = vc_paths::Paths::parse(text) else {
@@ -475,6 +510,7 @@ impl Report {
         self.print_textures();
         self.print_collision();
         self.print_placement();
+        self.print_timecycle();
     }
 
     fn print_archive(&self) {
@@ -576,11 +612,22 @@ impl Report {
         println!("  path nodes        {}", self.ide_path);
     }
 
+    fn print_timecycle(&self) {
+        println!("\ntimecyc");
+        println!("  weathers          {}", self.timecyc_weathers);
+        println!("  hours             {}", self.timecyc_hours);
+        println!(
+            "  far clip m        [{:.0},{:.0}]",
+            self.timecyc_far_clip_min, self.timecyc_far_clip_max
+        );
+        println!("  parse failures    {}", self.timecyc_failures);
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "a flat table of one assertion per measured total; splitting it would only relocate the data"
     )]
-    fn expected_checks(&self) -> [(&'static str, u64, u64); 39] {
+    fn expected_checks(&self) -> [(&'static str, u64, u64); 42] {
         [
             (
                 "img entries",
@@ -717,6 +764,17 @@ impl Report {
                 expected::IDE_TIME_OBJECTS,
             ),
             ("ide effects", self.ide_effects, expected::IDE_EFFECTS),
+            (
+                "timecyc weathers",
+                self.timecyc_weathers,
+                expected::TIMECYC_WEATHERS,
+            ),
+            ("timecyc hours", self.timecyc_hours, expected::TIMECYC_HOURS),
+            (
+                "timecyc parse failures",
+                u64::from(self.timecyc_failures),
+                0,
+            ),
         ]
     }
 
