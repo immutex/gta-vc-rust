@@ -33,6 +33,13 @@ mod expected {
     pub(super) const TXD_BC23: u64 = 1149;
     pub(super) const TXD_PALETTED: u64 = 24;
     pub(super) const TXD_WITH_MIPS: u64 = 895;
+
+    // Cooked bytes exceed the source by 539,712: paletted rasters expand from
+    // indices to RGBA8, which more than pays for the mip length prefixes the
+    // cooker strips. Both totals are gated because their difference is a
+    // property of those two decisions, not a free number.
+    pub(super) const COOKED_BYTES: u64 = 179_522_336;
+    pub(super) const SOURCE_LEVEL_BYTES: u64 = 178_982_624;
     pub(super) const TXD_UNCLASSIFIED: u64 = 0;
 
     // One file, `models/coll/peds.col`, is a known gap: its body layout does not
@@ -116,6 +123,13 @@ struct Report {
     dictionaries: u32,
     textures: u64,
     txd_skipped: u32,
+    cooked_textures: u64,
+    cooked_bytes: u64,
+    source_level_bytes: u64,
+    cooked_bc1: u64,
+    cooked_bc3: u64,
+    cooked_rgba8: u64,
+    cook_failures: u32,
     dxt1_shaped: u64,
     bc1_textures: u64,
     bc23_textures: u64,
@@ -196,6 +210,13 @@ fn collect(root: &GameRoot, verbose: bool) -> Result<Report> {
         dictionaries: 0,
         textures: 0,
         txd_skipped: 0,
+        cooked_textures: 0,
+        cooked_bytes: 0,
+        source_level_bytes: 0,
+        cooked_bc1: 0,
+        cooked_bc3: 0,
+        cooked_rgba8: 0,
+        cook_failures: 0,
         dxt1_shaped: 0,
         bc1_textures: 0,
         bc23_textures: 0,
@@ -324,6 +345,24 @@ fn tally_txd(data: &[u8], report: &mut Report) {
     report.dictionaries += 1;
     report.textures += dictionary.textures.len() as u64;
     report.txd_skipped += dictionary.skipped;
+    for texture in &dictionary.textures {
+        report.source_level_bytes += texture.level_data.len() as u64;
+
+        match vc_cook::cook_texture(texture) {
+            Ok(cooked) => {
+                report.cooked_textures += 1;
+                report.cooked_bytes += cooked.byte_len() as u64;
+
+                match cooked.format {
+                    vc_cook::TextureFormat::Bc1 => report.cooked_bc1 += 1,
+                    vc_cook::TextureFormat::Bc3 => report.cooked_bc3 += 1,
+                    vc_cook::TextureFormat::Rgba8 => report.cooked_rgba8 += 1,
+                }
+            }
+            Err(_) => report.cook_failures += 1,
+        }
+    }
+
     report.dxt1_shaped += dictionary.single_dxt1_levels() as u64;
     report.bc1_textures += dictionary.bc1_count() as u64;
     report.bc23_textures += dictionary.bc23_count() as u64;
@@ -631,6 +670,13 @@ impl Report {
         println!("  unclassified      {}", self.unclassified_textures);
         println!("  mip chains exact  {}", self.chains_exact);
         println!("  with mip chains   {}", self.textures_with_mips);
+        println!("  cooked            {}", self.cooked_textures);
+        println!("  cooked BC1        {}", self.cooked_bc1);
+        println!("  cooked BC3        {}", self.cooked_bc3);
+        println!("  cooked RGBA8      {}", self.cooked_rgba8);
+        println!("  cooked bytes      {}", self.cooked_bytes);
+        println!("  source bytes      {}", self.source_level_bytes);
+        println!("  cook failures     {}", self.cook_failures);
         println!("  non power of two  {}", self.non_power_of_two);
         println!("  skipped           {}", self.txd_skipped);
     }
@@ -699,7 +745,7 @@ impl Report {
         clippy::too_many_lines,
         reason = "a flat table of one assertion per measured total; splitting it would only relocate the data"
     )]
-    fn expected_checks(&self) -> [(&'static str, u64, u64); 50] {
+    fn expected_checks(&self) -> [(&'static str, u64, u64); 57] {
         [
             (
                 "img entries",
@@ -801,6 +847,21 @@ impl Report {
                 self.textures_with_mips,
                 expected::TXD_WITH_MIPS,
             ),
+            (
+                "cooked textures",
+                self.cooked_textures,
+                expected::TXD_TEXTURES,
+            ),
+            ("cooked bc1", self.cooked_bc1, expected::TXD_BC1),
+            ("cooked bc3", self.cooked_bc3, expected::TXD_BC23),
+            ("cooked rgba8", self.cooked_rgba8, expected::TXD_PALETTED),
+            ("cooked bytes", self.cooked_bytes, expected::COOKED_BYTES),
+            (
+                "source level bytes",
+                self.source_level_bytes,
+                expected::SOURCE_LEVEL_BYTES,
+            ),
+            ("cook failures", u64::from(self.cook_failures), 0),
             (
                 "col files",
                 self.col_files as u64,

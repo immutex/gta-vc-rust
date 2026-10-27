@@ -103,6 +103,9 @@ pub struct Texture {
     pub struct_len: u32,
     /// Mip levels declared by the descriptor, one when it carries no chain.
     pub levels: u8,
+    /// Everything after the descriptor: level zero, then each later level behind
+    /// its `u32` byte length, plus a palette for paletted rasters.
+    pub level_data: Vec<u8>,
 }
 
 impl Texture {
@@ -326,6 +329,11 @@ fn read_texture(section: &Section<'_>) -> Option<Texture> {
         declared_level_bytes: descriptor.u32_at(LEVEL_BYTES_OFFSET).ok()?,
         struct_len: descriptor.size(),
         levels: (descriptor.u32_at(LEVEL_COUNT_OFFSET).ok()? >> 8) as u8,
+        level_data: descriptor
+            .payload()
+            .get(DESCRIPTOR_SIZE..)
+            .unwrap_or_default()
+            .to_vec(),
     })
 }
 

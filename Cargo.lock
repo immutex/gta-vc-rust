@@ -281,6 +281,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vc_cook"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+ "vc_txd",
+]
+
+[[package]]
 name = "vc_dff"
 version = "0.1.0"
 dependencies = [
@@ -353,6 +361,7 @@ dependencies = [
  "clap",
  "rw_stream",
  "vc_col",
+ "vc_cook",
  "vc_dff",
  "vc_ide",
  "vc_ipl",
