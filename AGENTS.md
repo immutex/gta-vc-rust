@@ -31,11 +31,5 @@
 - Comments explain non-obvious *why* only; public items carry `///`. Do not narrate code.
 - Use `#[expect(lint, reason = "...")]`, never `#[allow]`.
 - New dependencies go in `[workspace.dependencies]` with an explicit version; permissive licences only.
-- Do not read `re3`/`reVC` sources or GPL implementations; see `PLAN.md` section 12.
+- Never read `re3`/`reVC` sources (any fork) or GPL implementations. `reVC` may be *run* as a black-box oracle only; see `PLAN.md` section 12.
 - Record plan or decision changes in `PLAN.md`, not in chat.
-
-## Commit Attribution
-AI commits MUST include:
-```
-Co-Authored-By: Ante (Antigma Labs)
-```

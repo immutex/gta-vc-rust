@@ -122,8 +122,11 @@ committing.
 
 - Never commit, attach or publish anything from `gta-vc/`, `vc-artifacts/`, or any cooked, converted
   or upscaled artifact derived from the game — in commits, pull requests, issues or release assets.
-- Do not read `re3`/`reVC` sources: they were taken down by Take-Two in 2021 and the repositories
-  return HTTP 451. Do not read GPL implementations of the file formats either.
+- Do not read `re3`/`reVC` sources, in any fork. They are decompiled from the original binaries and
+  were taken down by Take-Two in 2021; the surviving fork says so itself and carries an MIT licence
+  with a Proof-of-Usage condition aimed at automated systems. Building and *running* it as a
+  black-box oracle is fine — reading, quoting or porting it is not (`PLAN.md` section 12).
+- Do not read GPL implementations of the file formats (`rw-parser-rs`, OpenRW) either.
 - Reference screenshots of the running original are fine locally; do not commit them.
 
 ## Architecture

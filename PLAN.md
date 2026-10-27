@@ -26,7 +26,8 @@ period-accurate engine emulation with full mission parity.
 | D3 | **Modernized renderer on Bevy's PBR stack** (was: RenderWare-faithful custom pipeline) | Reversal of the first draft's "no `bevy_pbr`". Rationale below. |
 | D4 | **Clean-room, permissive dependencies only** | Unchanged. Apache/MIT; no `re3`/`reVC` (DMCA-blocked), no GPL crates. |
 | D5 | **Modern hardware is the target** — D3D12/Vulkan via wgpu, 64-bit, multithreaded, high refresh rates | The original's limits are treated as bugs to fix, not features to reproduce. |
-| D6 | **Framerate independence is a hard requirement** | VC is frame-coupled and needs its ~30 fps limiter; every ported system must behave identically at 30/60/144/240 fps render rates. Verified by test, not by hope (§14.4). |
+| D6 | **Framerate independence is a hard requirement** | VC is frame-coupled and needs its ~30 fps limiter; every ported system must behave identically at 30/60/144/240 fps render speeds. Verified by test, not by hope (§14.4). |
+| D7 | **`reVC` is a black-box oracle, never a source** (2026-10-26) | Its public fork describes itself as decompiled game code under a non-permissive "MIT with Proof-of-Usage" licence aimed at code assistants. Permitted: build it and observe behaviour. Forbidden: reading, quoting or porting its source. §12, §14.5 |
 
 ### Why D3 reversed
 
@@ -76,7 +77,7 @@ This is the project's honesty mechanism: a reviewer should be able to see exactl
 | Stays 1:1 (byte-identical assets, unchanged data) | Modernized | Ported behaviour (same rules, new implementation) |
 |---|---|---|
 | All art: 4,617 DFF, 1,368 TXD, COL, IFP, IPL/IDE | Renderer and shading | Player movement (= the original's arcade feel) |
-| Map layout, 9,114 instances, 3,511 object defs, 314 time objects | Draw distance (FarClp 2,000 → 5,000–8,000 + atmosphere) | Vehicle handling (`handling.cfg` values used verbatim) |
+| Map layout, 9,114 instances, 3,789 object defs, 342 time objects, 25,441 path nodes | Draw distance (FarClp 2,000 → 5,000–8,000 + atmosphere) | Vehicle handling (`handling.cfg` values used verbatim) |
 | `handling.cfg`, `weapon.dat`, `pedstats.dat`, `pedgrp.dat`, `ped.dat`, `carcols.dat`, `object.dat` | Mip chains + anisotropy + BC re-encode | Ped AI rules (stats, relationships, task outcomes) |
 | `timecyc.dat`, `water.dat`, `2dfx` entries | Lighting model, shadows, water shader | Police escalation ladder |
 | Audio: `sfx.RAW`/`sfx.SDT`, radio, 1,120 WAV, 90 MP3 | Mixer, spatialization, reverb | Traffic rules and junction behaviour |
@@ -126,10 +127,16 @@ Trap: **6,043 entries but only 6,032 unique names** (11 names duplicated — `ch
 
 | Metric | Value |
 |---|---|
-| Models / geometries | 4,613 / 6,506 |
-| **Triangles** | **2,207,065** |
-| **Vertices** | **2,819,169** |
+| Models / geometries | **4,613 / 6,505** |
+| **Triangles** | **2,207,246** |
+| **Vertices** | **2,818,890** |
+| Morph targets | 6,505 (every geometry declares one) |
 | Skinned meshes | **0** |
+
+Geometry counts are **self-verifying**: every clump declares its geometry count in its geometry
+list struct, and the declared total equals the number found (6,505, with zero mismatches across all
+4,613 models). These figures supersede the first draft's 6,506 / 2,207,065 / 2,819,169, which came
+from an ad-hoc walk rather than the verifier.
 
 2.2 M triangles is a light load for a modern GPU — the modern-HW budget problem is **not** geometry,
 it is draw-call count, overdraw, streaming and CPU simulation. Skinning being absent (ped/vehicle
@@ -139,14 +146,14 @@ bodies are rigid atomic hierarchies animated by per-frame matrices) removes anot
 
 | Source | Content | Status |
 |---|---|---|
-| IPL `inst` | **9,114 instance lines** (29 area files) | populated |
-| IDE `objs` / `tobj` / `2dfx` | 3,511 object defs / 314 time-controlled objects / **985 2dfx entries** | populated — 2dfx are lights/coronas/particles, i.e. **modernization material** (§5.7) |
-| IPL `cull` | cull zones | **empty in all 30 files** — cull zones live in the binary `data/Cullzone.dat` (155 KB, NUL-leading, non-text) |
-| IPL `pick` | pickups | **empty in all 30 files** — pickups are script-created ⇒ `vc_director` authors them |
-| IPL `path`, IDE `path` | path nodes | **empty in all 61 blocks** — see R2 |
-| `data/paths/` | only `flight.dat` (336 nodes), `flight2.dat` (158), `flight3.dat` (485), `spath0.dat` (79) | flight/script paths only; **no ground ped/vehicle graph** |
+| IPL `inst` | **9,114 instance lines** across 30 of the 32 `data/maps` IPL files | populated |
+| IDE `objs` / `tobj` / `2dfx` | 3,789 object defs / 342 time-controlled objects / **1,069 2dfx entries** (31 area files + `maps/generic.ide`) | populated — 2dfx are lights/coronas/particles, i.e. **modernization material** (§5.7) |
+| IPL `cull` blocks | — | **empty in all 30 area files**; the cull zones are in **`data/maps/cull.ipl` (631 zones)** |
+| IPL `pick` | pickups | **empty in all 30 area files** — pickups are script-created ⇒ `vc_director` authors them |
+| **`data/maps/paths.ipl`** | **25,441 path nodes** | **the ground ped/vehicle navigation graph is shipped** — see §4.10 |
+| `data/paths/` | `flight.dat` (336 nodes), `flight2.dat` (158), `flight3.dat` (485), `spath0.dat` (79) | flight and script paths |
 | `data/timecyc.dat` | **7 weather types × 24 hours**, 23 columns (ambient, ambient-object, directional, sky top/bottom, sun core/corona, shadow, light-shadow, pole-shadow, **FarClp**, fog, `LightOnGround`, 3 cloud colours, blur RGB, water RGBA) | populated — the master table for the modern atmosphere/sky model |
-| COL | 64 files (30 IMG + 34 loose), **4,272 records** | populated |
+| COL | 64 files (30 IMG + 34 loose), **4,245 records parsed** of an estimated 4,272 | one file, `models/coll/peds.col`, is a known gap (§4.10) |
 | `Cullzone.dat` / `Cullzoneempty.dat` | 50 zones (binary) | format probe at M0.5 |
 
 `FarClp` in the sunny row reads **2000.0** — the original draws 2,000 units and fogs away the rest.
@@ -222,6 +229,26 @@ readable source** for the shipped mission logic, which is consistent with leavin
 DFF `0x0C02FFFF`; TXD `0x1003FFFF` — mixed within one install, so parsers must branch on the stamp
 rather than pinning a version.
 
+### 4.10 Corrections from the M0 verifier
+
+The census tool replaced ad-hoc measurement with a checked one, and it overturned four conclusions
+from the first pass. Recorded because two of them changed the plan:
+
+| First-pass claim | Verified reality | Cause |
+|---|---|---|
+| "The ground nav graph is not shipped; the `path` blocks are empty" | **`data/maps/paths.ipl` holds 25,441 path nodes**, and `data/maps/cull.ipl` holds 631 cull zones | The first pass globbed `data/maps/*/*.ipl` — depth 2 only — missed the two depth-1 files, and generalised from the empty per-area blocks |
+| 6,506 geometries / 2,207,065 triangles / 2,819,169 vertices | **6,505 / 2,207,246 / 2,818,890**, declared == found, zero mismatches | The ad-hoc walk counted geometry sections anywhere in the tree rather than only under a geometry list |
+| 3,511 objects / 314 time objects / 985 2dfx / 4,272 COL records | **3,789 / 342 / 1,069 / 4,245 parsed** | Same depth-1 miss: `maps/generic.ide`, and the COL files under `models/coll` |
+| COL record layout understood | True for 33 of the 34 files | `models/coll/peds.col` does not fit the map layout — see below |
+
+**Lesson kept:** any walk of the install must be recursive and must report what it skipped. The
+census's `files_with_extension` does that, and its counts are what §4 quotes.
+
+**Known gap, tracked as a probe:** `models/coll/peds.col` (21 KB, ~30 records) does not parse with
+the map collision layout — its body is not `bounds + spheres + boxes + vertices + faces`. It is ped
+collision data, needed at M3, not at M0. The census reports it as unparsed and counts its records by
+magic marker so the total stays honest.
+
 ---
 
 ## 5. Modernization plan
@@ -240,7 +267,7 @@ The heart of this revision: what the original does, what we do instead, and what
 | 5.8 | Flat water plane, cheap animation | Modern water: animated normals, reflection/refraction, depth tint, timecyc `WaterRGBA`; polygons still from `water.dat`/`WATERPRO.DAT` | Modern look, same geography |
 | 5.9 | Synchronous IMG streaming, TXD-from-archive | **Async cooked-artifact streaming** (background threads, residency budgets, cell/frustum priority); cooked artifacts are compile-time-optimized (mips, BCn, quantized vertex streams, GPU-ready layouts) | No hitches, faster loads, controlled VRAM |
 | 5.10 | All AI ticked uniformly | **AI LOD**: tick rates by distance/visibility; budgeted ECS job scheduler; cheap steering for distant peds | Hundreds of active peds without CPU spikes |
-| 5.11 | 2002 node graph (not shipped — R2) | **Offline-generated nav**: navmesh/node graph built from cooked collision, hierarchical A* + flow fields + path cache | Modern pathfinding covering the whole map, no dependency on missing data |
+| 5.11 | 2002 node graph, **shipped as `data/maps/paths.ipl` (25,441 nodes)** | Read the original graph, then extend it: hierarchical A*, flow fields, path cache, and a generated navmesh over collision where the node graph has no coverage | Modern pathfinding that starts from the game's own connectivity instead of guessing at it |
 | 5.12 | Miles S3D, frame-driven audio | Own mixer on `cpal`: 48 kHz float DSP, spatialization, occlusion/low-pass, reverb, streamed radio | Modern audio; only the `.adf` codec is unresolved |
 | 5.13 | 4:3 HUD, keyboard-only, no rebinding | Widescreen-aware HUD/radar, gamepad + mouse look, rebinding, high-DPI text, in-game settings | Playable on a modern desktop |
 | 5.14 | 32-bit, Windows-only, DirectX 8 | 64-bit, multithreaded, **wgpu** (D3D12 on Windows, Vulkan on Linux) | One shader path, modern APIs. D3D12-specific features (mesh shaders, bindless, work graphs) are a stretch behind wgpu feature flags, not a foundation |
@@ -346,7 +373,9 @@ are what get streamed.
 - Data used verbatim: `pedstats.dat` (attributes), `pedgrp.dat` (zone groups), `ped.dat`
   (relationships), `weapon.dat`, `carcols.dat`, IDE `cars`/`peds` definitions in `default.ide`
   (model-id ranges: peds 0–129, vehicles 130–239, wheels 250–257, weapons 259–294).
-- Navigation: navmesh/node graph generated offline from collision (R2), hierarchical A*, flow fields
+- Navigation: the shipped `data/maps/paths.ipl` node graph (25,441 nodes) as the base
+  connectivity, with hierarchical A*, flow fields for crowds and a per-ped path cache; a cook-time
+  navmesh over collision fills the gaps the node graph cannot express (R2, §4.10).
   for crowds, per-ped path cache; replanning under budget.
 - AI LOD: full task ticking near the player, cost-reduced steering/velocity matching at distance,
   population parked beyond a radius (with correct re-entry).
@@ -382,8 +411,8 @@ documented gap with the 90 MP3s and the SFX bank still working. `vc_director` dr
 | # | Risk | Severity | Mitigation |
 |---|---|---|---|
 | R1 | **AI port scope** — ped task/event AI, traffic, police, combat is the largest remaining subsystem, now that the mission VM is gone | **High** | Behaviour-level port on ECS with a budget; land it in stages (M5 peds → M6 traffic/police → M7 combat), each with its own gate. Numbers come from the shipped data files, only the implementation is new. |
-| R2 | **Ground nav graph is not in the shipped data** — all 61 `path` blocks are empty; `data/paths/` holds only flight/script paths | **High** | `xtask navbuild`: generate navmesh/node graph offline from cooked collision. Also probe M0.5 for an undiscovered source (binary `Cullzone.dat` is a candidate). Generation is arguably the better modern answer either way. |
-| R3 | **Framerate-dependence retrofit** — the original's logic/timers are frame-coupled; VC is known to require its ~30 fps limiter | **High** | M0.5 probe to confirm timing sources; fixed-step core from M3 onward; D6 test (identical trajectory across render rates) as a hard gate, not a nice-to-have. |
+| R2 | **Path-graph semantics are undocumented** — the graph *is* shipped (`data/maps/paths.ipl`, 25,441 nodes) but its node/link/area fields and lane conventions are not described anywhere public | Medium | M0.5 probe: decode the node record layout and validate the graph by walking it (connectivity, one-way links, area ids). Downgraded from **High** on 2026-10-26: the first draft wrongly concluded the graph was absent (it globbed only depth-2 files; see §4.10). |
+| R3 | **Framerate-dependence retrofit** — the original's logic/timers are frame-coupled; VC is known to require its ~30 fps limiter | **High** | M0.5 probe to confirm timing sources; fixed-step core from M3 onward; D6 test (identical trajectory across render rates) as a hard gate, not a nice-to-have. Corroborated 2026-10-26: `reVC`'s public to-do list still carries "Fix physics for high FPS", so an independent project never resolved it either (§12). |
 | R4 | **Spawn/ambient policy was partly script-driven** (IPL `pick` and `cull` blocks are empty; pickups are script-created) | Medium | `vc_director` authors it; M0.5 estimates how much. Recorded in the fidelity ledger as authored, not ported. |
 | R5 | **Modern lighting can make 2002 art look wrong** (over-lit, plastic) | Medium | Prelit colours remain the base term; lighting is additive; keep a "period" toggle for A/B comparison against the original. |
 | R6 | **`.adf` radio** — proprietary, high-entropy, ~490 MB, no public codec | Medium | Time-boxed M0.5 spike. Failure ⇒ documented gap (iw4L precedent: report gaps, never synthesise). |
@@ -410,7 +439,7 @@ optimize. Every gate includes the §6 targets that apply to it.
 
 | # | Milestone | Gate |
 |---|---|---|
-| **M0** | **Recon + verifier** | `vc_transport` + `rw_stream` + `cargo xtask census` reproduces §4 exactly (6,043 IMG entries with 11 duplicate names; 4,617/1,368/30/28; 4,613 models; 6,506 geometries; 2,207,065 triangles; 9,114 instances; 3,511 objs / 314 tobj / 985 2dfx; 64 COL files / 4,272 records; install pinned to 1.0). Mismatch fails the build. |
+| **M0** | **Recon + verifier** ✅ 2026-10-26 | `vc_transport` + `rw_stream` + `cargo xtask census --verify` reproduces §4 exactly: 6,043 IMG entries with 11 duplicate names; 4,617/1,368/30/28 by extension; 4,613 models with 6,505 geometries (declared == found) and 2,207,246 triangles; 11,997 textures across 1,361 dictionaries; 9,114 instances, 631 cull zones, 25,441 path nodes; 3,789 objs / 342 tobj / 1,069 2dfx; 34 COL files with 4,245 records and exactly one known-unparsed file. Mismatch fails the build. |
 | **M0.5** | **Probes** (time-boxed) | Resolve: nav-graph source (R2), spawn-policy scope (R4), framerate-coupling confirmation (R3), full TXD format histogram, DFF vertex encoding (R7), `sfx.SDT` codec, `.adf` verdict (R6), `Cullzone.dat` layout, timecyc column semantics. |
 | **M1** | **First pixels, modern** | Cook one area (mips + BCn), custom materials on the Bevy pipeline, timecyc sky/fog, free camera. Gate: reference screenshot vs. the original for *asset identity* (texture, colour, silhouette) **plus** 5.3 mips visibly removing shimmer, at 144 fps 1440p. |
 | **M2** | **Whole world** | IPL/IDE → cells, async streaming, BVH + occlusion culling, extended far plane (5.2), LOD + impostors, water, day/night + weather. Gate: traverse the entire map at 144 fps 1440p with no holes, no pop beyond the authored LOD range, correct 24-hour cycle. |
@@ -449,9 +478,24 @@ optimize. Every gate includes the §6 targets that apply to it.
   texture packs and any exporter output are derived from the game and are equally non-distributable.**
   They are local build products.
 - **Clean-room**: implement from public format documentation and observed bytes. Do not read
-  `re3`/`reVC` (DMCA'd 2021-02-19; blocked, HTTP 451) or GPL implementations (`rw-parser-rs`,
-  OpenRW). MIT `librw` is acceptable as a *development-time oracle* only — never vendored, linked or
-  shipped.
+  `re3`/`reVC` (DMCA'd 2021-02-19; the original is blocked and returns HTTP 451) or GPL
+  implementations (`rw-parser-rs`, OpenRW). MIT `librw` is acceptable as a *development-time
+  oracle* only — never vendored, linked or shipped.
+- **`reVC` is a black-box oracle only** (D7, decided 2026-10-26). The surviving public fork
+  (`mrxenginner/reVC`) states in its own README that it is "the fully reversed source code for GTA
+  VC" and that everything outside `FIX_BUGS` guards is "completely reversed code from original
+  binaries". It licences itself as **MIT with a Proof-of-Usage condition**, which asks any automated
+  system that ingests the repository to record a usage row and credit it — a non-permissive term, and
+  one aimed squarely at tools like the agents working on this project. It is therefore both a
+  derivative of Take-Two's code and outside our licence policy.
+  - **Permitted**: building and running it — or the original `gta-vc.exe` — as an oracle, capturing
+    what it does (§14.5).
+  - **Forbidden**: opening its source, quoting it, porting logic from it, or reusing its identifiers
+    and constants. A licence from the reVC authors cannot grant rights to code they do not own, so
+    porting from it would make `vc-rs` an infringing derivative regardless of its stated licence.
+  - Rationale for the record: the fastest route to behaviour parity would have been to port it, and we
+    are deliberately declining that. The cost shows up as slower progress on AI and sim semantics
+    (M5–M7), which §9 R1 already carries as the top risk.
 - Neutral naming: repository `gta-vc-rust`, binary `vc-rs`; no Rockstar trademarks in the product
   name, no implied affiliation.
 
@@ -502,9 +546,19 @@ it; "modernized" means the implementation changed but the behaviour is intended 
 Replay a recorded input trace at 30/60/144/240 render fps and require the simulation trajectory to
 match. This is the test that proves "works well on modern hardware" rather than merely "runs".
 
-### 14.5 Visual reference
-Reference captures from the original at fixed camera poses: used to check *asset identity* (textures,
-colours, silhouettes, layout) — explicitly **not** to reproduce 2,000-unit fog or D3D8 shading.
+### 14.5 Reference behaviour and visuals
+
+Two oracles, both driven strictly as black boxes:
+
+- **The original `gta-vc.exe`** — ground truth for 1.0 behaviour and appearance at fixed camera poses.
+- **`reVC`** — permitted as a *host* only (D7, §12): it runs on modern systems, has a debug camera,
+  and is convenient for capturing behaviour traces that are awkward to record in the original.
+
+Protocol: drive the oracle with recorded inputs and capture what it *does* — positions, velocities,
+timings, AI decisions, screenshots — then diff our implementation against those traces. Screenshots
+check *asset identity* (textures, colours, silhouettes, layout), explicitly **not** the 2,000-unit fog
+or D3D8 shading, which we are replacing on purpose. Captures live in the ignored `vc-artifacts/` and
+are never committed. Source is never read, quoted or ported (§12).
 
 ---
 
@@ -528,15 +582,19 @@ move into `xtask` at M0 so the numbers are re-derived rather than trusted.
 ### 15.2 Open probes (M0.5)
 
 1. Install-version assertion — hash the census to pin 1.0 and detect 1.1/retail drift.
-2. Ground nav-graph source, or confirmation that we generate it (R2).
+2. **Path graph, now located** (`data/maps/paths.ipl`, §4.10): decode the node record layout — links,
+   area ids, lane conventions — and validate it by walking connectivity (R2).
 3. How much ambient/spawn policy was script-driven (R4).
 4. Framerate coupling: confirm which subsystems are frame-stepped in the original (R3).
 5. Full TXD raster-format histogram — how much of 182.6 MB is BC1 vs. needs decode.
 6. DFF vertex attribute encodings and the meaning of `0x50E` / `0x105` (R7).
 7. `sfx.RAW` codec (PCM vs. ADPCM) and the `.adf` container verdict (R6).
-8. `Cullzone.dat` binary layout.
-9. `timecyc.dat` column semantics per weather, including `LightOnGround` and the cloud/blur columns.
-10. Bevy 0.20 custom-material + instancing hooks proven **in our own build** — the API shape is now
+8. `Cullzone.dat` binary layout, and the `cull.ipl` record layout against it (both are cull zones).
+9. `models/coll/peds.col` body layout — the one collision file that does not match the map format
+   (§4.10). Needed before M3, so it can wait, but it must not be forgotten.
+10. The 1,173 textures that are not single-level DXT1 (of 11,997): their raster formats and mip chains.
+11. `timecyc.dat` column semantics per weather, including `LightOnGround` and the cloud/blur columns.
+12. Bevy 0.20 custom-material + instancing hooks proven **in our own build** — the API shape is now
     verified from docs and shipped examples (§20), so the probe is a one-material smoke test, not a
     design question (R10).
 
@@ -651,7 +709,8 @@ they are three separate features, not one.
 | `cacache` | Only real content-addressed cache crate, but no release in ~2 years | hand-rolled ~200 lines over `blake3` + atomic rename |
 | `rapier3d`, `avian3d` | Full solvers we don't want; VC's feel is arcade and hand-derived | `parry3d` queries only |
 | Meshlets / mesh shaders | Bevy's meshlet path is **Vulkan/Metal only**, forbids MSAA, and is opaque-only — unusable on our D3D12 target | plain meshes + indirect draws |
-| `rw-parser-rs`, OpenRW, `re3`/`reVC` | GPL-3.0 / DMCA'd | our own parsers (§12) |
+| `rw-parser-rs`, OpenRW | GPL-3.0 | our own parsers (§12) |
+| `re3`/`reVC` (any fork) | decompiled game code; the surviving fork is MIT with a Proof-of-Usage condition aimed at automated assistants | never read or vendored; run as a black-box oracle only (D7, §12) |
 | `bevy_gltf` | Not used — our assets cook into our own format | — |
 | `bevy_kira_audio` | We own the mixer (§8.5) | — |
 
@@ -692,12 +751,20 @@ SPDX differs from what it actually links (R17).
 
 Ordered; steps 0–2 are prerequisites for everything else.
 
-**Progress, 2026-10-26:** steps 0, 1 and 2 are done — Rust 1.99.1 in WSL and rustup on Windows,
-`cargo-deny` installed, the repository initialised and committed with `.gitignore` guarding the game
-install, and the workspace skeleton (`vc_transport`, `xtask`, workspace lints, `deny.toml`) passing
-`cargo clippy -- -D warnings`, tests and `cargo deny check`. Remaining blocker: `cmake`/`clang`
-(needs a sudo password; only the encoder backends and the `librw` oracle need them).
-Next up: step 3, `xtask census`.
+**Progress, 2026-10-26:** **M0 is complete.** Steps 0–6 are done: Rust 1.99.1 pinned in WSL with
+rustup on Windows, `cargo-deny` installed, the repository initialised with the game install ignored,
+the workspace passing `cargo clippy -- -D warnings` / tests / `cargo deny check`, and the verifier in
+place — `vc_transport` (install discovery, IMG v1 archive), `rw_stream` (section tree, shared by the
+format crates), `vc_dff`, `vc_txd`, `vc_col`, `vc_ipl`, `vc_ide`, plus `cargo xtask census --verify`
+and `cargo xtask dump`.
+
+Running the verifier against the install **corrected four measurements from the first pass** (§4.10)
+and produced the totals §4 now quotes. It also surfaced one real parser bug on the way (a nesting
+counter in the section iterator) and one genuine unknown (`models/coll/peds.col`).
+
+Next: the M0.5 probes (§15.2), then M1 — first pixels.
+Remaining blocker: `cmake`/`clang` (needs a sudo password; only the encoder backends and the `librw`
+oracle need them).
 
 | # | Task | Done when |
 |---|---|---|
