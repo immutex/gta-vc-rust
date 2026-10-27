@@ -199,15 +199,25 @@ TextureDictionary(0x16)
 └── Extension(0x03)
 ```
 
-120 sampled textures across 120 TXDs: **64 gave a byte-exact `width × height / 2` payload** — i.e.
-**single-level DXT1/BC1**, **no mip chain** (`256²`→32,768 B; `128²`→8,192 B; `64²`→2,048 B;
-`32²`→512 B; names confirm dimensions). The remainder need the full descriptor walk (M0.5).
+**All 11,997 textures are decoded and byte-exact** (probe 10, §15.2). The descriptor is 92 bytes;
+level zero follows it directly, and **every later level is preceded by its own `u32` byte length** —
+four bytes per extra level beyond the data itself. With that model every descriptor in the install
+accounts for its payload exactly, and the census gates on it.
 
-Two modernization consequences, both high-value and cheap:
+| Storage family | Textures | Share | Level zero |
+|---|---|---|---|
+| **BC1** (DXT1) | **10,824** | 90.2% | `w × h / 2` |
+| **BC2/BC3** (DXT3 or DXT5) | **1,149** | 9.6% | `w × h`; the two share a byte budget, so sizes cannot separate them |
+| **Paletted** | **24** | 0.2% | `w × h` plus a 1,024-byte RGBA palette |
+| Unaccounted | 0 | — | — |
 
-1. Block copy to BC1/BC3 — no decode, no recompression for the base level.
-2. **The original has no mipmaps.** Generating mip chains in the cook plus anisotropic filtering is
-   the single cheapest, most visible image-quality upgrade available (§5.3).
+Every dimension is a power of two, and **895 textures carry a mip chain** — so the original does ship
+mips, for 7.5% of the set rather than none. Two consequences for the cook:
+
+1. BC1 and BC2/BC3 upload as-is, with no decode and no recompression, for 99.8% of the bytes.
+2. Generating chains for the other 11,102 plus anisotropic filtering is still the cheapest visible
+   image-quality upgrade available (§5.3), and the 24 paletted rasters are the only ones needing
+   expansion before upload, because wgpu has no indexed colour format.
 
 ### 4.7 Audio
 
@@ -314,7 +324,7 @@ The heart of this revision: what the original does, what we do instead, and what
 |---|---|---|---|
 | 5.1 | **Logic coupled to frame rate**; VC needs its ~30 fps limiter, and high frame rates break timers/physics | **Fixed-step simulation** (60 Hz) fully decoupled from rendering; render interpolates transforms; every timer expressed in ticks; input sampled per frame, consumed per tick | Stable behaviour at any refresh rate — the prerequisite for "work well on modern hardware" (D6) |
 | 5.2 | **`FarClp` = 2,000 units**, fog used to hide the cut | Extended far plane (**5,000–8,000**), LOD chain (existing `lod*.dff`), **distant-city impostors/HLOD baked in the cook**, modern atmospheric fog driven by timecyc's fog/sky columns | Vice City reads as a city instead of a fog bank; the biggest visual change |
-| 5.3 | **No mipmaps**; point/linear filtering; DXT1 | **Generate mip chains in the cook**, anisotropic filtering, trilinear; BC7 for alpha-heavy textures (2× VRAM, ~366 MB — affordable) | Kills 2002 shimmer on roads, fences, foliage, railings |
+| 5.3 | **Mip chains on only 7.5% of textures** (895 of 11,997); point/linear filtering; DXT1 and DXT3/5 | **Generate mip chains in the cook**, anisotropic filtering, trilinear; BC7 for alpha-heavy textures (2× VRAM, ~366 MB — affordable) | Kills 2002 shimmer on roads, fences, foliage, railings |
 | 5.4 | **Immediate-mode per-object draws**, D3D8 | Bevy 0.20 already batches repeated mesh+material pairs and **runs GPU preprocessing + indirect draws by default**; the cook dedupes geometry so instances share mesh handles; our CPU work is limited to per-cell streaming/LOD decisions | Draw calls collapse to hundreds — and this is configuration, not engine work (§20) |
 | 5.5 | Cull zones + occluder boxes, BSP-less CPU culling | **Bevy 0.20 ships two-phase GPU occlusion culling** (`OcclusionCulling` + depth prepass, hierarchical Z-buffer, no baking); enable it and measure; `Cullzone.dat` retained as a coarse streaming hint | Long draw distance without paying for it — again configuration rather than engine work (§20) |
 | 5.6 | Fixed-function shading; no shadows beyond a shadow blob | Custom `Material`s on Bevy's pipeline: cascaded sun shadows, spot shadows for headlights, alpha-test/dual-texture preserved, `AlphaMode`/blend from RW state | Modern shading that keeps the art direction |
@@ -650,7 +660,9 @@ move into `xtask` at M0 so the numbers are re-derived rather than trusted.
 8. `Cullzone.dat` binary layout, and the `cull.ipl` record layout against it (both are cull zones).
 9. `models/coll/peds.col` body layout — the one collision file that does not match the map format
    (§4.10). Needed before M3, so it can wait, but it must not be forgotten.
-10. The 1,173 textures that are not single-level DXT1 (of 11,997): their raster formats and mip chains.
+10. **Texture formats** — done 2026-10-27 (§4.6): all 11,997 descriptors are byte-exact, split
+    10,824 BC1 / 1,149 BC2-or-BC3 / 24 paletted, with 895 carrying mip chains. What remains is
+    separating DXT3 from DXT5, which the byte budget cannot do — a decoder-side question for M1.
 11. `timecyc.dat` column semantics per weather, including `LightOnGround` and the cloud/blur columns.
 12. Bevy 0.20 custom-material + instancing hooks proven **in our own build** — the API shape is now
     verified from docs and shipped examples (§20), so the probe is a one-material smoke test, not a

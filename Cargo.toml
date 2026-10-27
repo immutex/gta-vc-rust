@@ -19,11 +19,11 @@ bevy = { version = "0.20.0", default-features = false, features = [
   "bevy_post_process",
   "bevy_anti_alias",
   "bevy_winit",
+  "x11",
   "bevy_ui",
   "bevy_ui_render",
   "bevy_text",
   "bevy_sprite",
-  "bevy_gilrs",
   "multi_threaded",
   "png",
 ] }

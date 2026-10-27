@@ -29,6 +29,11 @@ mod expected {
     pub(super) const TXD_DICTIONARIES: u32 = 1361;
     pub(super) const TXD_TEXTURES: u64 = 11_997;
     pub(super) const TXD_DXT1_SHAPED: u64 = 10_824;
+    pub(super) const TXD_BC1: u64 = 10_824;
+    pub(super) const TXD_BC23: u64 = 1149;
+    pub(super) const TXD_PALETTED: u64 = 24;
+    pub(super) const TXD_WITH_MIPS: u64 = 895;
+    pub(super) const TXD_UNCLASSIFIED: u64 = 0;
 
     // One file, `models/coll/peds.col`, is a known gap: its body layout does not
     // match the map collision layout yet (PLAN.md open probe). Everything else
@@ -96,6 +101,12 @@ struct Report {
     textures: u64,
     txd_skipped: u32,
     dxt1_shaped: u64,
+    bc1_textures: u64,
+    bc23_textures: u64,
+    paletted_textures: u64,
+    unclassified_textures: u64,
+    chains_exact: u64,
+    textures_with_mips: u64,
     non_power_of_two: u64,
     col_files: usize,
     col_records: u64,
@@ -156,6 +167,12 @@ fn collect(root: &GameRoot, verbose: bool) -> Result<Report> {
         textures: 0,
         txd_skipped: 0,
         dxt1_shaped: 0,
+        bc1_textures: 0,
+        bc23_textures: 0,
+        paletted_textures: 0,
+        unclassified_textures: 0,
+        chains_exact: 0,
+        textures_with_mips: 0,
         non_power_of_two: 0,
         col_files: 0,
         col_records: 0,
@@ -264,6 +281,12 @@ fn tally_txd(data: &[u8], report: &mut Report) {
     report.textures += dictionary.textures.len() as u64;
     report.txd_skipped += dictionary.skipped;
     report.dxt1_shaped += dictionary.single_dxt1_levels() as u64;
+    report.bc1_textures += dictionary.bc1_count() as u64;
+    report.bc23_textures += dictionary.bc23_count() as u64;
+    report.paletted_textures += dictionary.paletted_count() as u64;
+    report.unclassified_textures += dictionary.unclassified_count() as u64;
+    report.chains_exact += dictionary.chains_exact() as u64;
+    report.textures_with_mips += dictionary.with_mips() as u64;
     report.non_power_of_two += dictionary.non_power_of_two() as u64;
 }
 
@@ -497,6 +520,12 @@ impl Report {
         println!("  dictionaries      {}", self.dictionaries);
         println!("  textures          {}", self.textures);
         println!("  single DXT1 level {}", self.dxt1_shaped);
+        println!("  DXT1 family       {}", self.bc1_textures);
+        println!("  DXT3/5 family     {}", self.bc23_textures);
+        println!("  paletted          {}", self.paletted_textures);
+        println!("  unclassified      {}", self.unclassified_textures);
+        println!("  mip chains exact  {}", self.chains_exact);
+        println!("  with mip chains   {}", self.textures_with_mips);
         println!("  non power of two  {}", self.non_power_of_two);
         println!("  skipped           {}", self.txd_skipped);
     }
@@ -551,7 +580,7 @@ impl Report {
         clippy::too_many_lines,
         reason = "a flat table of one assertion per measured total; splitting it would only relocate the data"
     )]
-    fn expected_checks(&self) -> [(&'static str, u64, u64); 33] {
+    fn expected_checks(&self) -> [(&'static str, u64, u64); 39] {
         [
             (
                 "img entries",
@@ -617,6 +646,28 @@ impl Report {
                 "txd dxt1 shaped",
                 self.dxt1_shaped,
                 expected::TXD_DXT1_SHAPED,
+            ),
+            ("txd bc1 family", self.bc1_textures, expected::TXD_BC1),
+            ("txd bc2/bc3 family", self.bc23_textures, expected::TXD_BC23),
+            (
+                "txd paletted",
+                self.paletted_textures,
+                expected::TXD_PALETTED,
+            ),
+            (
+                "txd unclassified",
+                self.unclassified_textures,
+                expected::TXD_UNCLASSIFIED,
+            ),
+            (
+                "txd mip chains exact",
+                self.chains_exact,
+                expected::TXD_TEXTURES,
+            ),
+            (
+                "txd with mips",
+                self.textures_with_mips,
+                expected::TXD_WITH_MIPS,
             ),
             (
                 "col files",
