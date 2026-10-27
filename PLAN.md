@@ -704,7 +704,10 @@ move into `xtask` at M0 so the numbers are re-derived rather than trusted.
 8. **`cull.ipl`** — done 2026-10-27 (§4.14): 631 boxes with their anchor semantics resolved. What
     remains is the binary `Cullzone.dat` beside it, and whether the two hold the same zones.
 9. `models/coll/peds.col` body layout — the one collision file that does not match the map format
-   (§4.10). Needed before M3, so it can wait, but it must not be forgotten.
+   (§4.10). Needed before M3, so it can wait, but it must not be forgotten. Its oracle route is
+   closed (§10.1: `librw` has no COL reader, `librwgta` is unlicensed), so it needs accounting
+   forensics like the rest: the record declares 732 bytes, spheres sit at the expected offset, and
+   the four list counts that follow do not add up, which points at ped-specific list ordering.
 10. **Texture formats** — done 2026-10-27 (§4.6): all 11,997 descriptors are byte-exact, split
     10,824 BC1 / 1,149 BC2-or-BC3 / 24 paletted, with 895 carrying mip chains. What remains is
     separating DXT3 from DXT5, which the byte budget cannot do — a decoder-side question for M1.
