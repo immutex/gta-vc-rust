@@ -1,0 +1,13 @@
+[package]
+name = "rw_stream"
+description = "Reader for the RenderWare binary stream shared by DFF, TXD and IFP files."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

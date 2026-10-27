@@ -44,6 +44,17 @@ toml = "1.1.8"
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 
+# Workspace crates, declared here so member manifests stay uniform. The version
+# repeats [workspace.package] on purpose: a path-only dependency reads as a
+# wildcard requirement, which `cargo deny` (rightly) rejects.
+rw_stream = { version = "0.1.0", path = "crates/rw_stream" }
+vc_col = { version = "0.1.0", path = "crates/vc_col" }
+vc_dff = { version = "0.1.0", path = "crates/vc_dff" }
+vc_ide = { version = "0.1.0", path = "crates/vc_ide" }
+vc_ipl = { version = "0.1.0", path = "crates/vc_ipl" }
+vc_transport = { version = "0.1.0", path = "crates/vc_transport" }
+vc_txd = { version = "0.1.0", path = "crates/vc_txd" }
+
 [workspace.lints.rust]
 unsafe_code = "deny"
 missing_docs = "deny"
@@ -66,6 +77,10 @@ cast_sign_loss = { level = "allow", priority = 11 }
 # Naming and attribute noise that costs more than it catches.
 module_name_repetitions = { level = "allow", priority = 11 }
 must_use_candidate = { level = "allow", priority = 11 }
+
+# Binary crates have no exported surface, so `pub(crate)` inside a private module
+# is exactly what we mean. `unreachable_pub` still guards library crates.
+redundant_pub_crate = { level = "allow", priority = 11 }
 
 [profile.dev]
 opt-level = 1

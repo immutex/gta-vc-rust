@@ -1,0 +1,14 @@
+[package]
+name = "vc_dff"
+description = "Summaries of Vice City DFF clumps."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rw_stream.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
