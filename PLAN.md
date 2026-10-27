@@ -305,7 +305,38 @@ corner:
 Consequence for M2: culling uses the corners, which are unambiguous, and treats `Cullzone.dat` (the
 155 KB binary beside it) as a separate open question — the two may not carry the same zones.
 
-### 4.15 Spawn policy: what the data gives us, and what it does not
+### 4.17 Why probe 4 is answered without running the game
+
+Probe 4 was going to measure how badly Vice City's simulation drifts with frame rate. **It cannot be
+measured on the reference machine, and it does not need to be.**
+
+The original **does not start on this machine at all**: it opens to a black screen with the audio
+running normally. That is the classic failure of a 2002 Direct3D 8 title on a modern GPU, driver and
+refresh rate — and it is a first-hand instance of exactly what this project exists to replace. Worth
+recording plainly, because it is the clearest statement of the problem in the whole document: the
+software this recreates cannot run on the hardware it is being recreated for.
+
+The measurement is also unnecessary, for a reason that follows from D6:
+
+- **The coupling itself is established.** The game ships a user-facing option called *Frame Limiter*
+  whose purpose is to pin the simulation near 30 fps, and the one serious reimplementation of this
+  engine still carries "Fix physics for high FPS" on its public to-do list — an independent project
+  that ported the same logic and did not solve it either.
+- **Quantifying the drift would be reproducing it.** We are replacing the timestep with a fixed 60 Hz
+  core (§5.1), so the original's per-frame drift is not a behaviour to match — it is the defect being
+  engineered away. Measuring it in detail would only be useful to someone choosing to preserve it.
+- **The gate is ours to own.** D6 (§14.4) replays one input trace at 30/60/144/240 render rates and
+  requires the simulation trajectory to match. That tests *our* build, on *our* hardware, and it fails
+  closed. It is a stronger check than any observation of the original could provide.
+
+So probe 4 closes as **confirmed by public evidence and superseded by D6**, not as skipped.
+
+One knock-on: §14.5 expected reference captures from the running original at fixed camera poses. That
+route is now blocked on this machine. The alternatives, in order: run `reVC` as the permitted
+black-box host (D7) since it does start on modern hardware; use the original wherever it does run; or
+fall back to asset-identity checks computed from the decoded data, and say so in the parity matrix.
+
+### 4.15 Spawn policy: what the data gives us and what it does not
 
 Probe 3 asked how much of the ambient spawning was script-driven. Split by actor:
 
@@ -535,7 +566,7 @@ documented gap with the 90 MP3s and the SFX bank still working. `vc_director` dr
 |---|---|---|---|
 | R1 | **AI port scope** — ped task/event AI, traffic, police, combat is the largest remaining subsystem, now that the mission VM is gone | **High** | Behaviour-level port on ECS with a budget; land it in stages (M5 peds → M6 traffic/police → M7 combat), each with its own gate. Numbers come from the shipped data files, only the implementation is new. |
 | R2 | **How path blocks interconnect is undecoded** — the graph is shipped and its block/point/link structure is decoded (§4.11), but links are intra-block only and the coordinate scale is a hypothesis (1/16) rather than a decoded fact | Medium | M5 must either find the cross-block fields or build connectivity from proximity; `vc_paths` keeps raw values beside derived ones so a scale correction is cheap. Downgraded from **High** on 2026-10-26, when the file was first located. |
-| R3 | **Framerate-dependence retrofit** — the original's logic/timers are frame-coupled; VC is known to require its ~30 fps limiter | **High** | M0.5 probe to confirm timing sources; fixed-step core from M3 onward; D6 test (identical trajectory across render rates) as a hard gate, not a nice-to-have. Corroborated 2026-10-26: `reVC`'s public to-do list still carries "Fix physics for high FPS", so an independent project never resolved it either (§12). |
+| R3 | **Framerate-dependence retrofit** — the original's logic and timers are frame-coupled, and it ships a *Frame Limiter* option to keep the simulation near 30 fps | **High** | The coupling is confirmed rather than measured (§4.17): the original will not even start on the reference machine, so D6 — replaying one input trace at 30/60/144/240 render rates and requiring identical trajectories — is the gate, and it tests our build rather than the original's. |
 | R4 | **Spawn/ambient policy was partly script-driven** (IPL `pick` and `cull` blocks are empty; pickups are script-created) | Medium | `vc_director` authors it; M0.5 estimates how much. Recorded in the fidelity ledger as authored, not ported. |
 | R5 | **Modern lighting can make 2002 art look wrong** (over-lit, plastic) | Medium | Prelit colours remain the base term; lighting is additive; keep a "period" toggle for A/B comparison against the original. |
 | R6 | **`.adf` radio** — two container magics, 7.97-bit entropy, embedded ID3, ~490 MB | Medium | Probe 7 (§4.7) narrowed it to a container problem with MPEG audio inside, which is progress but not a decoder. Failure ⇒ documented gap (iw4L precedent: report gaps, never synthesise). |
@@ -712,7 +743,9 @@ move into `xtask` at M0 so the numbers are re-derived rather than trusted.
    right unit (R2).
 3. **Spawn policy** — answered 2026-10-27 (§4.15): `pedgrp.dat` is per-zone ped groups, so peds need no
    script; `default.ide` carries car classes but no density, so only vehicle mix is authored.
-4. Framerate coupling: confirm which subsystems are frame-stepped in the original (R3).
+4. **Framerate coupling** — closed 2026-10-27 (§4.17): the original does not run on the reference
+   machine (black screen, audio only), the coupling is established from public evidence, and
+   quantifying it would be reproducing the defect. D6 is the gate instead.
 5. Full TXD raster-format histogram — how much of 182.6 MB is BC1 vs. needs decode.
 6. **DFF geometry layout** — done 2026-10-27 (§4.12): decoded, byte-verified on all 6,505 geometries
    and gated by the census. What remains is the `0x50E` / `0x105` extension chunks, which are optional
