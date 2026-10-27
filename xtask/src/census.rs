@@ -107,6 +107,11 @@ struct Report {
     geometry_layout_failures: u32,
     prelit_geometries: u32,
     normal_geometries: u32,
+    decoded_triangles: u64,
+    decoded_vertices: u64,
+    decoded_index_errors: u64,
+    decoded_non_finite: u64,
+    decode_failures: u32,
     dff_error_samples: Vec<String>,
     dictionaries: u32,
     textures: u64,
@@ -182,6 +187,11 @@ fn collect(root: &GameRoot, verbose: bool) -> Result<Report> {
         geometry_layout_failures: 0,
         prelit_geometries: 0,
         normal_geometries: 0,
+        decoded_triangles: 0,
+        decoded_vertices: 0,
+        decoded_index_errors: 0,
+        decoded_non_finite: 0,
+        decode_failures: 0,
         dff_error_samples: Vec::new(),
         dictionaries: 0,
         textures: 0,
@@ -281,6 +291,11 @@ fn tally_dff(name: &str, data: &[u8], report: &mut Report) {
             report.vertices += clump.vertices;
             report.morph_targets += clump.morph_targets;
             report.geometry_layouts_exact += clump.layouts_exact;
+            report.decoded_triangles += clump.decoded_triangles;
+            report.decoded_vertices += clump.decoded_vertices;
+            report.decoded_index_errors += clump.decoded_index_errors;
+            report.decoded_non_finite += clump.decoded_non_finite;
+            report.decode_failures += clump.decode_failures;
             report.geometry_layout_failures += clump.layout_failures;
             report.prelit_geometries += clump.prelit_geometries;
             report.normal_geometries += clump.normal_geometries;
@@ -593,6 +608,11 @@ impl Report {
         println!("  layout failures   {}", self.geometry_layout_failures);
         println!("  prelit            {}", self.prelit_geometries);
         println!("  with normals      {}", self.normal_geometries);
+        println!("  decoded tris      {}", self.decoded_triangles);
+        println!("  decoded verts     {}", self.decoded_vertices);
+        println!("  bad indices       {}", self.decoded_index_errors);
+        println!("  non-finite pos    {}", self.decoded_non_finite);
+        println!("  decode failures   {}", self.decode_failures);
         println!("  dff parse errors  {}", self.dff_failures);
 
         for sample in &self.dff_error_samples {
@@ -679,7 +699,7 @@ impl Report {
         clippy::too_many_lines,
         reason = "a flat table of one assertion per measured total; splitting it would only relocate the data"
     )]
-    fn expected_checks(&self) -> [(&'static str, u64, u64); 45] {
+    fn expected_checks(&self) -> [(&'static str, u64, u64); 50] {
         [
             (
                 "img entries",
@@ -735,6 +755,19 @@ impl Report {
                 u64::from(self.geometry_layout_failures),
                 0,
             ),
+            (
+                "decoded triangles",
+                self.decoded_triangles,
+                expected::TRIANGLES,
+            ),
+            (
+                "decoded vertices",
+                self.decoded_vertices,
+                expected::VERTICES,
+            ),
+            ("decoded bad indices", self.decoded_index_errors, 0),
+            ("decoded non-finite", self.decoded_non_finite, 0),
+            ("decode failures", u64::from(self.decode_failures), 0),
             (
                 "txd dictionaries",
                 u64::from(self.dictionaries),

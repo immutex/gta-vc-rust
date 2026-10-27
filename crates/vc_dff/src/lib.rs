@@ -173,6 +173,240 @@ pub fn read_layout(payload: &[u8], stamp: u32) -> Result<GeometryLayout, DffErro
     })
 }
 
+/// One vertex after decoding.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Vertex {
+    /// Position in model space.
+    pub position: [f32; 3],
+    /// Normal, zero when the geometry carries none.
+    pub normal: [f32; 3],
+    /// Texture coordinates per set, zero when the geometry carries none.
+    pub texcoords: [[f32; 2]; 2],
+    /// Prelit colour as stored, white when the geometry carries none.
+    pub colour: [u8; 4],
+}
+
+impl Default for Vertex {
+    fn default() -> Self {
+        Self {
+            position: [0.0; 3],
+            normal: [0.0; 3],
+            texcoords: [[0.0; 2]; 2],
+            colour: [255, 255, 255, 255],
+        }
+    }
+}
+
+/// One triangle and the material it belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Triangle {
+    /// Vertex indices.
+    pub indices: [u16; 3],
+    /// Material index into the geometry's material list.
+    pub material: u16,
+}
+
+/// A geometry's decoded geometry data.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecodedGeometry {
+    /// Geometry flags, as stored.
+    pub flags: u32,
+    /// Vertices, in file order.
+    pub vertices: Vec<Vertex>,
+    /// Triangles, in file order.
+    pub triangles: Vec<Triangle>,
+    /// Whether the vertices carry prelit colours.
+    pub has_colours: bool,
+    /// Whether the vertices carry normals.
+    pub has_normals: bool,
+    /// Number of texcoord sets that were present.
+    pub texcoord_sets: u8,
+}
+
+impl DecodedGeometry {
+    /// Indices that point past the vertex list.
+    pub fn out_of_range_indices(&self) -> usize {
+        let limit = self.vertices.len() as u16;
+
+        self.triangles
+            .iter()
+            .flat_map(|triangle| triangle.indices)
+            .filter(|index| *index >= limit)
+            .count()
+    }
+
+    /// Vertices whose position is not finite.
+    pub fn non_finite_positions(&self) -> usize {
+        self.vertices
+            .iter()
+            .filter(|vertex| vertex.position.iter().any(|value| !value.is_finite()))
+            .count()
+    }
+}
+
+/// Decodes the vertex and index data of one geometry struct.
+///
+/// # Errors
+/// Returns [`DffError::PayloadTooShort`] when the struct ends before a field the
+/// layout needs, and [`DffError::IndexOutOfRange`] when a triangle names a vertex
+/// that does not exist.
+pub fn decode_geometry(payload: &[u8], stamp: u32) -> Result<DecodedGeometry, DffError> {
+    let flags = read_u32(payload, 0)?;
+    let triangle_count = read_u32(payload, GEOMETRY_TRIANGLES)? as usize;
+    let vertex_count = read_u32(payload, GEOMETRY_VERTICES)? as usize;
+    let morph_targets = read_u32(payload, GEOMETRY_MORPH_TARGETS)?;
+
+    let has_colours = flags & FLAG_PRELIT != 0;
+    let texcoord_sets = if flags & FLAG_TEXTURED2 != 0 {
+        2
+    } else {
+        u8::from(flags & FLAG_TEXTURED != 0)
+    };
+
+    let mut cursor = 16;
+
+    if stamp < SURFACE_PROPERTIES_ABSENT_FROM {
+        cursor += SURFACE_PROPERTIES_BYTES;
+    }
+
+    let mut vertices = vec![Vertex::default(); vertex_count];
+
+    if has_colours {
+        read_colours(payload, cursor, &mut vertices)?;
+        cursor += COLOUR_BYTES * vertex_count;
+    }
+
+    if texcoord_sets != 0 {
+        read_texcoords(payload, cursor, texcoord_sets, &mut vertices)?;
+        cursor += TEXCOORD_BYTES * usize::from(texcoord_sets) * vertex_count;
+    }
+
+    let triangles = read_triangles(payload, cursor, triangle_count)?;
+    cursor += TRIANGLE_BYTES * triangle_count;
+
+    let has_normals = read_morph_targets(payload, cursor, morph_targets, &mut vertices)?;
+
+    let decoded = DecodedGeometry {
+        flags,
+        vertices,
+        triangles,
+        has_colours,
+        has_normals,
+        texcoord_sets,
+    };
+
+    if decoded.out_of_range_indices() != 0 {
+        return Err(DffError::IndexOutOfRange);
+    }
+
+    Ok(decoded)
+}
+
+fn read_colours(payload: &[u8], at: usize, vertices: &mut [Vertex]) -> Result<(), DffError> {
+    for (index, vertex) in vertices.iter_mut().enumerate() {
+        let start = at + COLOUR_BYTES * index;
+        let bytes = payload
+            .get(start..start + COLOUR_BYTES)
+            .ok_or(DffError::PayloadTooShort { offset: start })?;
+
+        vertex.colour = [bytes[0], bytes[1], bytes[2], bytes[3]];
+    }
+
+    Ok(())
+}
+
+fn read_texcoords(
+    payload: &[u8],
+    at: usize,
+    sets: u8,
+    vertices: &mut [Vertex],
+) -> Result<(), DffError> {
+    let count = vertices.len();
+
+    for (index, vertex) in vertices.iter_mut().enumerate() {
+        for set in 0..usize::from(sets) {
+            let start = at + TEXCOORD_BYTES * (set * count + index);
+
+            vertex.texcoords[set] = [read_f32(payload, start)?, read_f32(payload, start + 4)?];
+        }
+    }
+
+    Ok(())
+}
+
+fn read_triangles(payload: &[u8], at: usize, count: usize) -> Result<Vec<Triangle>, DffError> {
+    let mut triangles = Vec::with_capacity(count);
+
+    for index in 0..count {
+        let start = at + TRIANGLE_BYTES * index;
+        let first = read_u32(payload, start)?;
+        let second = read_u32(payload, start + 4)?;
+
+        triangles.push(Triangle {
+            indices: [(first >> 16) as u16, first as u16, (second >> 16) as u16],
+            material: second as u16,
+        });
+    }
+
+    Ok(triangles)
+}
+
+/// Reads the morph targets, returning whether any carried normals.
+fn read_morph_targets(
+    payload: &[u8],
+    mut cursor: usize,
+    count: u32,
+    vertices: &mut [Vertex],
+) -> Result<bool, DffError> {
+    let mut has_normals = false;
+
+    for _ in 0..count {
+        cursor += 16; // bounding sphere
+
+        let has_vertices = read_u32(payload, cursor)? != 0;
+        let target_has_normals = read_u32(payload, cursor + 4)? != 0;
+        cursor += 8;
+
+        if has_vertices {
+            for (index, vertex) in vertices.iter_mut().enumerate() {
+                let start = cursor + VECTOR_BYTES * index;
+                vertex.position = [
+                    read_f32(payload, start)?,
+                    read_f32(payload, start + 4)?,
+                    read_f32(payload, start + 8)?,
+                ];
+            }
+
+            cursor += VECTOR_BYTES * vertices.len();
+        }
+
+        if target_has_normals {
+            has_normals = true;
+
+            for (index, vertex) in vertices.iter_mut().enumerate() {
+                let start = cursor + VECTOR_BYTES * index;
+                vertex.normal = [
+                    read_f32(payload, start)?,
+                    read_f32(payload, start + 4)?,
+                    read_f32(payload, start + 8)?,
+                ];
+            }
+
+            cursor += VECTOR_BYTES * vertices.len();
+        }
+    }
+
+    Ok(has_normals)
+}
+
+fn read_f32(payload: &[u8], offset: usize) -> Result<f32, DffError> {
+    let field = payload
+        .get(offset..offset + 4)
+        .ok_or(DffError::PayloadTooShort { offset })?;
+
+    Ok(f32::from_le_bytes([field[0], field[1], field[2], field[3]]))
+}
+
 fn read_u32(payload: &[u8], offset: usize) -> Result<u32, DffError> {
     let field = payload
         .get(offset..offset + 4)
@@ -210,6 +444,16 @@ pub struct Clump {
     pub normal_geometries: u32,
     /// Texcoord sets across all geometries.
     pub texcoord_sets: u64,
+    /// Triangles produced by decoding.
+    pub decoded_triangles: u64,
+    /// Vertices produced by decoding.
+    pub decoded_vertices: u64,
+    /// Indices that pointed past their vertex list.
+    pub decoded_index_errors: u64,
+    /// Vertices whose position was not finite.
+    pub decoded_non_finite: u64,
+    /// Geometries whose data could not be decoded.
+    pub decode_failures: u32,
 }
 
 impl Clump {
@@ -271,6 +515,16 @@ pub fn summarize(bytes: &[u8]) -> Result<Clump, DffError> {
             clump.vertices += u64::from(geometry_struct.u32_at(GEOMETRY_VERTICES)?);
             clump.morph_targets += u64::from(geometry_struct.u32_at(GEOMETRY_MORPH_TARGETS)?);
 
+            match decode_geometry(geometry_struct.payload(), geometry_struct.stamp().0) {
+                Ok(decoded) => {
+                    clump.decoded_triangles += decoded.triangles.len() as u64;
+                    clump.decoded_vertices += decoded.vertices.len() as u64;
+                    clump.decoded_index_errors += decoded.out_of_range_indices() as u64;
+                    clump.decoded_non_finite += decoded.non_finite_positions() as u64;
+                }
+                Err(_) => clump.decode_failures += 1,
+            }
+
             match read_layout(geometry_struct.payload(), geometry_struct.stamp().0) {
                 Ok(layout) => {
                     if layout.is_exact() {
@@ -314,6 +568,9 @@ pub enum DffError {
         /// The parent section kind.
         parent: SectionKind,
     },
+    /// A triangle names a vertex that does not exist.
+    #[error("triangle indices run past the vertex list")]
+    IndexOutOfRange,
     /// A struct ended before a field the layout needs.
     #[error("struct payload has no field at offset {offset}")]
     PayloadTooShort {
@@ -534,6 +791,77 @@ mod tests {
         assert!(layout.is_exact());
         assert!(layout.prelit);
         assert_eq!(layout.texcoord_sets, 2);
+    }
+
+    /// Builds a one-triangle geometry carrying colours, texcoords and positions.
+    fn decodable_payload() -> Vec<u8> {
+        let mut payload = (FLAG_PRELIT | FLAG_TEXTURED | 0x02u32)
+            .to_le_bytes()
+            .to_vec();
+        payload.extend(1u32.to_le_bytes()); // one triangle
+        payload.extend(3u32.to_le_bytes()); // three vertices
+        payload.extend(1u32.to_le_bytes()); // one morph target
+
+        // Prelit colours: three distinct vertices.
+        for shade in [10u8, 20, 30] {
+            payload.extend([shade, shade, shade, 255]);
+        }
+
+        // Texcoords: vertex 0 at (0, 0), vertex 1 at (1, 0), vertex 2 at (0, 1).
+        for uv in [[0.0f32, 0.0], [1.0, 0.0], [0.0, 1.0]] {
+            payload.extend(uv[0].to_le_bytes());
+            payload.extend(uv[1].to_le_bytes());
+        }
+
+        // One triangle: vertices 0, 1, 2 with material 7.
+        payload.extend(1u32.to_le_bytes()); // v0 = 0, v1 = 1
+        payload.extend(0x0002_0007u32.to_le_bytes()); // v2 = 2, material = 7
+
+        payload.extend([0u8; 16]); // bounding sphere
+        payload.extend(1i32.to_le_bytes()); // has vertices
+        payload.extend(0i32.to_le_bytes()); // no normals
+
+        for position in [[1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]] {
+            for axis in position {
+                payload.extend(axis.to_le_bytes());
+            }
+        }
+
+        payload
+    }
+
+    #[test]
+    fn decodes_positions_colours_and_texcoords() {
+        let decoded = decode_geometry(&decodable_payload(), 0x1003_FFFF).unwrap();
+
+        assert_eq!(decoded.vertices.len(), 3);
+        assert_eq!(decoded.vertices[0].position, [1.0, 2.0, 3.0]);
+        assert_eq!(decoded.vertices[2].position, [7.0, 8.0, 9.0]);
+        assert_eq!(decoded.vertices[0].colour, [10, 10, 10, 255]);
+        assert_eq!(decoded.vertices[1].texcoords[0], [1.0, 0.0]);
+        assert!(decoded.has_colours);
+        assert_eq!(decoded.texcoord_sets, 1);
+        assert!(!decoded.has_normals);
+    }
+
+    #[test]
+    fn decodes_a_triangle_and_its_material() {
+        let decoded = decode_geometry(&decodable_payload(), 0x1003_FFFF).unwrap();
+
+        assert_eq!(decoded.triangles.len(), 1);
+        assert_eq!(decoded.triangles[0].indices, [0, 1, 2]);
+        assert_eq!(decoded.triangles[0].material, 7);
+    }
+
+    #[test]
+    fn rejects_a_triangle_that_names_a_missing_vertex() {
+        let mut payload = decodable_payload();
+        // Overwrite the second triangle word so v2 points at vertex 9.
+        payload[56..60].copy_from_slice(&0x0009_0007u32.to_le_bytes());
+
+        let result = decode_geometry(&payload, 0x1003_FFFF);
+
+        assert_eq!(result.unwrap_err(), DffError::IndexOutOfRange);
     }
 
     #[test]
