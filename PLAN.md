@@ -281,6 +281,21 @@ carries it, and every point keeps its raw value beside the derived position, so 
 Still open: fields 2, 6 and 7–11, and **how blocks interconnect** — links are intra-block only, so the
 cross-block structure must live in one of the undecoded fields. That is now M5's main unknown.
 
+### 4.14 Cull zones: 631 boxes, decoded
+
+`data/maps/cull.ipl` holds 631 records of eleven values: an anchor, two corners, then two values whose
+meaning is still open (40 and 0 in every record). The corners are the box; the anchor is not a third
+corner:
+
+| Property | Verified |
+|---|---|
+| Anchor x and y | **exactly the box centre on 630 of 631 records**, to within a hundredth of a unit. One record is 1.55 units off on x — a shipped-data anomaly, recorded rather than smoothed over |
+| Anchor z | **not the box centre**: it ranges from the box floor to above 62% of its height, and for a tenth of the records it *is* the floor, so it is an independent height |
+| Box size | median roughly 11 × 11 × 7 units — these are doorways, interiors and small occluded pockets rather than district-sized regions |
+
+Consequence for M2: culling uses the corners, which are unambiguous, and treats `Cullzone.dat` (the
+155 KB binary beside it) as a separate open question — the two may not carry the same zones.
+
 ### 4.13 Timecyc: decoded, and the draw distance varies with weather
 
 `vc_timecyc` reads all 168 rows with no failures, and the column order the file's own header names
@@ -675,7 +690,8 @@ move into `xtask` at M0 so the numbers are re-derived rather than trusted.
    and gated by the census. What remains is the `0x50E` / `0x105` extension chunks, which are optional
    extras rather than part of the vertex data.
 7. `sfx.RAW` codec (PCM vs. ADPCM) and the `.adf` container verdict (R6).
-8. `Cullzone.dat` binary layout, and the `cull.ipl` record layout against it (both are cull zones).
+8. **`cull.ipl`** — done 2026-10-27 (§4.14): 631 boxes with their anchor semantics resolved. What
+    remains is the binary `Cullzone.dat` beside it, and whether the two hold the same zones.
 9. `models/coll/peds.col` body layout — the one collision file that does not match the map format
    (§4.10). Needed before M3, so it can wait, but it must not be forgotten.
 10. **Texture formats** — done 2026-10-27 (§4.6): all 11,997 descriptors are byte-exact, split

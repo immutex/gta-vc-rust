@@ -295,6 +295,9 @@ version = "0.1.0"
 [[package]]
 name = "vc_ipl"
 version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
 
 [[package]]
 name = "vc_paths"

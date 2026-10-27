@@ -253,24 +253,24 @@ struct Reader<'a> {
 }
 
 impl Reader<'_> {
-    fn take1(&mut self) -> f32 {
+    const fn take1(&mut self) -> f32 {
         let value = self.values[self.cursor];
         self.cursor += 1;
 
         value
     }
 
-    fn take3(&mut self) -> [f32; 3] {
+    const fn take3(&mut self) -> [f32; 3] {
         [self.take1(), self.take1(), self.take1()]
     }
 
-    fn take4(&mut self) -> [f32; 4] {
+    const fn take4(&mut self) -> [f32; 4] {
         [self.take1(), self.take1(), self.take1(), self.take1()]
     }
 }
 
 /// Failures while reading the table.
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum TimecycError {
     /// A row does not carry the expected number of values.
     #[error("weather {weather} hour {hour} has {found} values, expected {VALUES_PER_ROW}")]

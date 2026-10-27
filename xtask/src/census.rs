@@ -45,6 +45,10 @@ mod expected {
     pub(super) const IPL_FILES: usize = 32;
     pub(super) const IPL_INSTANCES: u64 = 9114;
     pub(super) const IPL_CULL_ZONES: u64 = 631;
+    pub(super) const CULL_BOXES: u64 = 631;
+    // One shipped record places its anchor 1.55 units off the box centre on x
+    // while the other 630 are exact to within a hundredth; see PLAN.md section 4.14.
+    pub(super) const CULL_CENTRE_MISMATCHES: u64 = 1;
     pub(super) const IPL_PATH_NODES: u64 = 25_441;
 
     pub(super) const PATH_BLOCKS: u64 = 1957;
@@ -129,6 +133,9 @@ struct Report {
     ipl_files: usize,
     ipl_instances: u64,
     ipl_cull: u64,
+    cull_zones: u64,
+    cull_centre_mismatches: u64,
+    cull_failures: u32,
     ipl_pickups: u64,
     ipl_path: u64,
     path_blocks: u64,
@@ -201,6 +208,9 @@ fn collect(root: &GameRoot, verbose: bool) -> Result<Report> {
         ipl_files: 0,
         ipl_instances: 0,
         ipl_cull: 0,
+        cull_zones: 0,
+        cull_centre_mismatches: 0,
+        cull_failures: 0,
         ipl_pickups: 0,
         ipl_path: 0,
         path_blocks: 0,
@@ -361,6 +371,7 @@ fn tally_placement(report: &mut Report, directory: &Path, verbose: bool) -> Resu
         report.ipl_path += stats.path_nodes;
 
         tally_path_graph(report, &text);
+        tally_cull_zones(report, &text);
 
         if verbose {
             println!(
@@ -437,6 +448,21 @@ fn tally_timecycle(report: &mut Report, path: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Accumulates the cull zones an IPL file declares.
+fn tally_cull_zones(report: &mut Report, text: &str) {
+    let Ok(zones) = vc_ipl::parse_cull_zones(text) else {
+        report.cull_failures += 1;
+
+        return;
+    };
+
+    report.cull_zones += zones.len() as u64;
+    report.cull_centre_mismatches += zones
+        .iter()
+        .filter(|zone| !zone.anchor_xy_is_box_centre())
+        .count() as u64;
 }
 
 /// Accumulates the decoded path graph from one IPL file.
@@ -612,6 +638,9 @@ impl Report {
         println!("  ipl files         {}", self.ipl_files);
         println!("  instances         {}", self.ipl_instances);
         println!("  cull zones        {}", self.ipl_cull);
+        println!("  cull boxes        {}", self.cull_zones);
+        println!("  anchor xy off box {}", self.cull_centre_mismatches);
+        println!("  cull failures     {}", self.cull_failures);
         println!("  pickups           {}", self.ipl_pickups);
         println!("  path lines        {}", self.ipl_path);
         println!("  path blocks       {}", self.path_blocks);
@@ -650,7 +679,7 @@ impl Report {
         clippy::too_many_lines,
         reason = "a flat table of one assertion per measured total; splitting it would only relocate the data"
     )]
-    fn expected_checks(&self) -> [(&'static str, u64, u64); 42] {
+    fn expected_checks(&self) -> [(&'static str, u64, u64); 45] {
         [
             (
                 "img entries",
@@ -757,6 +786,13 @@ impl Report {
             ),
             ("ipl instances", self.ipl_instances, expected::IPL_INSTANCES),
             ("ipl cull zones", self.ipl_cull, expected::IPL_CULL_ZONES),
+            ("cull boxes", self.cull_zones, expected::CULL_BOXES),
+            (
+                "cull anchor xy off centre",
+                self.cull_centre_mismatches,
+                expected::CULL_CENTRE_MISMATCHES,
+            ),
+            ("cull failures", u64::from(self.cull_failures), 0),
             ("ipl path lines", self.ipl_path, expected::IPL_PATH_NODES),
             ("path blocks", self.path_blocks, expected::PATH_BLOCKS),
             (
