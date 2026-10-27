@@ -553,6 +553,40 @@ pub fn summarize(bytes: &[u8]) -> Result<Clump, DffError> {
     Ok(clump)
 }
 
+/// Every geometry in a clump, decoded.
+///
+/// # Errors
+/// Returns [`DffError::UnexpectedRoot`] when the file is not a clump,
+/// [`DffError::MissingStruct`] when a geometry list or geometry has no struct,
+/// and propagates [`StreamError`] for malformed trees.
+pub fn decode_clump(bytes: &[u8]) -> Result<Vec<DecodedGeometry>, DffError> {
+    let root = Section::root(bytes)?;
+
+    if root.kind() != SectionKind::CLUMP {
+        return Err(DffError::UnexpectedRoot { kind: root.kind() });
+    }
+
+    let mut geometries = Vec::new();
+
+    for geometry_list in root.children_of(SectionKind::GEOMETRY_LIST)? {
+        for geometry in geometry_list.children_of(SectionKind::GEOMETRY)? {
+            let geometry_struct =
+                geometry
+                    .child(SectionKind::STRUCT)?
+                    .ok_or(DffError::MissingStruct {
+                        parent: SectionKind::GEOMETRY,
+                    })?;
+
+            geometries.push(decode_geometry(
+                geometry_struct.payload(),
+                geometry_struct.stamp().0,
+            )?);
+        }
+    }
+
+    Ok(geometries)
+}
+
 /// Failures while summarising a clump.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum DffError {

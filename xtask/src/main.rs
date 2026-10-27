@@ -6,8 +6,10 @@
 )]
 
 mod census;
+mod cook;
 mod dump;
 
+use std::path::PathBuf;
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
@@ -33,6 +35,17 @@ enum Cmd {
         #[arg(long)]
         verbose: bool,
     },
+    /// Cook one model and its textures into a versioned artifact.
+    Cook {
+        /// Model name in the archive, for example `landstal.dff`.
+        model: String,
+        /// Texture dictionaries to cook alongside it.
+        #[arg(long = "txd")]
+        txds: Vec<String>,
+        /// Output path; defaults to `vc-artifacts/cooked/<model>.vcck`.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// Print the `RenderWare` section tree of a file or archive entry.
     Dump {
         /// A file path, or `img:<name>` to read an entry from `models/gta3.img`.
@@ -47,6 +60,7 @@ fn main() -> Result<()> {
     match Cli::parse().command {
         Cmd::Check => check(),
         Cmd::Census { verify, verbose } => census::run(verify, verbose),
+        Cmd::Cook { model, txds, out } => cook::run(&model, &txds, out.as_deref()),
         Cmd::Dump { target, depth } => dump::run(&target, depth),
     }
 }

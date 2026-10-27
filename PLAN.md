@@ -375,6 +375,18 @@ Two accounting notes worth keeping, because both look like bugs otherwise:
 
 What M1 still needs is the runtime: a Bevy app that streams these artifacts and draws them.
 
+**The artifact format, and a decision change.** `cargo xtask cook landstal.dff --txd generic.txd`
+writes a `.vcck` file and reads it back to verify the write: magic `VCCK`, a `u32` **format word**,
+then a `postcard` payload. The first artifact — the flatbed — is 24 meshes, 3,803 vertices, 2,529
+triangles and 13 textures in 533,616 bytes.
+
+§6.2 originally called for hand-rolled `bytemuck` POD for cooked data and `postcard` only for saves.
+That split is **dropped**: `postcard` over our own serde types gives the same on-disk stability the POD
+decision was protecting (the schema is ours, the format word guards it), for a fraction of the code,
+and it was verified by round-tripping a synthetic scene in tests and the real model on disk. A POD
+layout remains available later if load time ever demands it, and the format word makes that swap
+visible rather than silent.
+
 ### 4.13 Timecyc: decoded, and the draw distance varies with weather
 
 `vc_timecyc` reads all 168 rows with no failures, and the column order the file's own header names

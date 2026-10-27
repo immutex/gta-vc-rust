@@ -21,8 +21,142 @@
     deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vc_txd::{Family, Texture};
+
+/// Magic at the head of a cooked artifact.
+pub const MAGIC: [u8; 4] = *b"VCCK";
+
+/// Format word. Bump whenever the encoded layout changes.
+pub const FORMAT_WORD: u32 = 1;
+
+/// A vertex in the form the runtime uploads.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SceneVertex {
+    /// Position in model space.
+    pub position: [f32; 3],
+    /// Normal, zero when the source carried none.
+    pub normal: [f32; 3],
+    /// Texcoords per set.
+    pub uv: [[f32; 2]; 2],
+    /// Prelit colour.
+    pub colour: [u8; 4],
+}
+
+/// One mesh: vertices, indices and the material each triangle uses.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SceneMesh {
+    /// Name, `model#geometry`.
+    pub name: String,
+    /// Source geometry flags.
+    pub flags: u32,
+    /// Vertices.
+    pub vertices: Vec<SceneVertex>,
+    /// Triangle indices, three per triangle.
+    pub indices: Vec<u32>,
+    /// Material index per triangle.
+    pub materials: Vec<u16>,
+    /// Whether the vertices carry prelit colours.
+    pub has_colours: bool,
+    /// Whether the vertices carry normals.
+    pub has_normals: bool,
+}
+
+/// A cooked scene: the meshes and textures one model needs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Scene {
+    /// Meshes, in clump order.
+    pub meshes: Vec<SceneMesh>,
+    /// Textures the meshes reference.
+    pub textures: Vec<CookedTexture>,
+}
+
+impl Scene {
+    /// Builds a scene from one decoded clump.
+    pub fn from_geometries(model: &str, geometries: &[vc_dff::DecodedGeometry]) -> Self {
+        let meshes = geometries
+            .iter()
+            .enumerate()
+            .map(|(index, geometry)| SceneMesh {
+                name: format!("{model}#{index}"),
+                flags: geometry.flags,
+                vertices: geometry
+                    .vertices
+                    .iter()
+                    .map(|vertex| SceneVertex {
+                        position: vertex.position,
+                        normal: vertex.normal,
+                        uv: vertex.texcoords,
+                        colour: vertex.colour,
+                    })
+                    .collect(),
+                indices: geometry
+                    .triangles
+                    .iter()
+                    .flat_map(|triangle| triangle.indices.map(u32::from))
+                    .collect(),
+                materials: geometry
+                    .triangles
+                    .iter()
+                    .map(|triangle| triangle.material)
+                    .collect(),
+                has_colours: geometry.has_colours,
+                has_normals: geometry.has_normals,
+            })
+            .collect();
+
+        Self {
+            meshes,
+            textures: Vec::new(),
+        }
+    }
+
+    /// Triangles across every mesh.
+    pub fn triangle_count(&self) -> usize {
+        self.meshes.iter().map(|mesh| mesh.indices.len() / 3).sum()
+    }
+
+    /// Vertices across every mesh.
+    pub fn vertex_count(&self) -> usize {
+        self.meshes.iter().map(|mesh| mesh.vertices.len()).sum()
+    }
+
+    /// Encodes the scene: magic, format word, then the payload.
+    ///
+    /// # Errors
+    /// Returns [`CookError::Encode`] when the payload cannot be serialised.
+    pub fn encode(&self) -> Result<Vec<u8>, CookError> {
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend(FORMAT_WORD.to_le_bytes());
+        bytes.extend(postcard::to_allocvec(self).map_err(|_| CookError::Encode)?);
+
+        Ok(bytes)
+    }
+
+    /// Decodes a scene, refusing an unknown format word.
+    ///
+    /// # Errors
+    /// Returns [`CookError::NotACookedScene`] when the magic is missing,
+    /// [`CookError::FormatWord`] when the file was written by another build, and
+    /// [`CookError::Decode`] when the payload does not parse.
+    pub fn decode(bytes: &[u8]) -> Result<Self, CookError> {
+        if bytes.len() < 8 || bytes[0..4] != MAGIC {
+            return Err(CookError::NotACookedScene);
+        }
+
+        let word = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+
+        if word != FORMAT_WORD {
+            return Err(CookError::FormatWord {
+                found: word,
+                expected: FORMAT_WORD,
+            });
+        }
+
+        postcard::from_bytes(&bytes[8..]).map_err(|_| CookError::Decode)
+    }
+}
 
 /// Bytes a paletted raster's palette occupies.
 pub const PALETTE_BYTES: usize = 1024;
@@ -31,7 +165,7 @@ pub const PALETTE_BYTES: usize = 1024;
 pub const PALETTE_ENTRIES: usize = PALETTE_BYTES / 4;
 
 /// GPU texture formats the cook emits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TextureFormat {
     /// DXT1 / BC1, four bits per pixel.
     Bc1,
@@ -53,7 +187,7 @@ impl TextureFormat {
 }
 
 /// One mip level.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Level {
     /// Level width in pixels.
     pub width: u32,
@@ -64,7 +198,7 @@ pub struct Level {
 }
 
 /// A texture ready for upload.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CookedTexture {
     /// Texture name.
     pub name: String,
@@ -231,6 +365,23 @@ pub enum CookError {
     /// The raster matched no known family.
     #[error("texture raster matched no known family")]
     UnknownFamily,
+    /// The scene could not be encoded.
+    #[error("failed to encode the scene")]
+    Encode,
+    /// The scene could not be decoded.
+    #[error("failed to decode the scene")]
+    Decode,
+    /// The bytes are not a cooked scene at all.
+    #[error("not a cooked scene: magic missing")]
+    NotACookedScene,
+    /// The format word does not match this build.
+    #[error("cooked with format word {found}, this build writes {expected}")]
+    FormatWord {
+        /// Word found in the file.
+        found: u32,
+        /// Word this build expects.
+        expected: u32,
+    },
 }
 
 #[cfg(test)]
@@ -300,6 +451,55 @@ mod tests {
         let result = cook_texture(&texture);
 
         assert!(matches!(result, Err(CookError::LevelSize { .. })));
+    }
+
+    #[test]
+    fn round_trips_a_scene() {
+        let geometry = vc_dff::DecodedGeometry {
+            flags: 0x10037,
+            vertices: vec![vc_dff::Vertex {
+                position: [1.0, 2.0, 3.0],
+                normal: [0.0, 1.0, 0.0],
+                texcoords: [[0.25, 0.75], [0.0, 0.0]],
+                colour: [10, 20, 30, 255],
+            }],
+            triangles: vec![vc_dff::Triangle {
+                indices: [0, 0, 0],
+                material: 3,
+            }],
+            has_colours: true,
+            has_normals: true,
+            texcoord_sets: 1,
+        };
+        let scene = Scene::from_geometries("test", &[geometry]);
+
+        let bytes = scene.encode().unwrap();
+        let decoded = Scene::decode(&bytes).unwrap();
+
+        assert_eq!(decoded, scene);
+        assert_eq!(decoded.triangle_count(), 1);
+        assert_eq!(decoded.meshes[0].name, "test#0");
+    }
+
+    #[test]
+    fn rejects_bytes_that_are_not_a_scene() {
+        let result = Scene::decode(b"NOPE0000");
+
+        assert_eq!(result.unwrap_err(), CookError::NotACookedScene);
+    }
+
+    #[test]
+    fn rejects_a_foreign_format_word() {
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend(99u32.to_le_bytes());
+        bytes.extend([0u8; 4]);
+
+        let result = Scene::decode(&bytes);
+
+        assert!(matches!(
+            result,
+            Err(CookError::FormatWord { found: 99, .. })
+        ));
     }
 
     #[test]
