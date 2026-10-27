@@ -167,7 +167,7 @@ Clump(0x10)
 ├── FrameList(0x0E)   hierarchy; 27,306 frame-tag chunks (0x0253F2FE) across the corpus
 ├── GeometryList(0x1A) → Geometry(0x0F) × N
 │   ├── Struct(0x01)  u32 flags, u32 numTriangles, u32 numVertices, u32 numMorphTargets,
-│   │                 ambient/diffuse/specular RGBA
+│   │                 then the attribute arrays — see §4.12
 │   ├── MaterialList(0x08) → Material(0x07) × M
 │   └── Extension(0x03) → 0x50E, 0x105   (GTA-specific extras)
 └── Atomic(0x14) × N  frame index, geometry index, flags
@@ -270,6 +270,39 @@ carries it, and every point keeps its raw value beside the derived position, so 
 
 Still open: fields 2, 6 and 7–11, and **how blocks interconnect** — links are intra-block only, so the
 cross-block structure must live in one of the undecoded fields. That is now M5's main unknown.
+
+### 4.12 DFF geometry layout: decoded and byte-verified
+
+Probe 6 (§15.2) was the M1 cook blocker: without the vertex encoding there is no mesh conversion at
+all. It is now decoded, and the decoding is **verified by byte accounting on every shipped geometry** —
+6,505 of 6,505 structs are fully accounted for, with zero failures. `vc_dff::read_layout` implements
+it and the census gates on the result.
+
+The struct, in file order (all offsets from the start of the geometry's struct payload):
+
+| Field | Size | Notes |
+|---|---|---|
+| `flags`, `numTriangles`, `numVertices`, `numMorphTargets` | 4 × `u32` | the four words §4.4 already had |
+| **surface properties** | 12 | ambient RGB as three `f32`s, always `1.0` in shipped data — **present only for stamps below `0x1003FFFF`** |
+| prelit colours | `4 × vertices` | `RGBA` as four `u8`s, present when flag `0x08` |
+| texcoords | `8 × vertices × sets` | two `f32`s per set; one set with flag `0x04`, two with `0x80` |
+| triangles | `8 × numTriangles` | two `u32` words: three `u16` indices, the third in the high half of the second word, and the material id in its low half |
+| per morph target | 16 + 8 | bounding sphere as four `f32`s, then `hasVertices` and `hasNormals` as two `i32`s |
+| positions / normals | `12 × vertices` each | three `f32`s, present only when the corresponding flag word is non-zero |
+
+Two corrections to earlier assumptions, both caught by measurement rather than reasoning:
+
+1. **There is no `ambient/diffuse/specular` RGBA block** as the first draft implied. What looked like
+   one was the prelit colour array in one case and the surface-properties record in another.
+2. **The 12-byte surface-properties record is stamp-dependent.** Geometries stamped `0x0800FFFF` or
+   `0x0C02FFFF` carry it; those stamped `0x1003FFFF` do not. Assuming it unconditionally left 1,919
+   geometries misaligned by exactly 12 bytes, and ignoring it entirely left the other 4,586 short.
+
+The layout was cross-checked against MIT `librw`'s reader, which is the oracle §10.1 sanctioned for
+this question: `librw` reads the same fields in the same order, and the byte accounting agrees with it
+on the whole corpus. Feature totals that fall out of it: **4,185 geometries carry prelit colours** and
+**2,331 carry normals** — so roughly a third of the model set has no prelit data and needs the
+timecyc-driven lighting path rather than baked vertex colour.
 
 ---
 
@@ -438,7 +471,7 @@ documented gap with the 90 MP3s and the SFX bank still working. `vc_director` dr
 | R4 | **Spawn/ambient policy was partly script-driven** (IPL `pick` and `cull` blocks are empty; pickups are script-created) | Medium | `vc_director` authors it; M0.5 estimates how much. Recorded in the fidelity ledger as authored, not ported. |
 | R5 | **Modern lighting can make 2002 art look wrong** (over-lit, plastic) | Medium | Prelit colours remain the base term; lighting is additive; keep a "period" toggle for A/B comparison against the original. |
 | R6 | **`.adf` radio** — proprietary, high-entropy, ~490 MB, no public codec | Medium | Time-boxed M0.5 spike. Failure ⇒ documented gap (iw4L precedent: report gaps, never synthesise). |
-| R7 | **DFF vertex encoding details** (quantisation, attribute order, `0x50E`/`0x105`, dual UV/prelit sets) | Medium | Differential testing against MIT `librw` as a development-only oracle; golden vectors in CI. |
+| R7 | **DFF vertex encoding** — ~~undecoded~~ **decoded and byte-verified 2026-10-27** (§4.12): all 6,505 geometry structs are fully accounted for and the census gates on it | ~~Medium~~ Closed | Kept as a note: the surface-properties record is stamp-dependent, the one detail a future reader is likely to re-derive the hard way |
 | R8 | **Offline cook vs. semantic loss** | Medium | Cooked formats store material state words and vertex streams verbatim; glTF is a debug lens only. |
 | R9 | **Legal exposure** — Take-Two DMCA'd comparable projects (re3/reVC blocked, HTTP 451) | Medium | §12. |
 | R10 | **Bevy 0.20 specifics**: WESL shader syntax replaced `#import`/`#ifdef`; instancing/batching assumptions and `bevy_pbr` custom-material hooks need confirming at M1 | Low–medium | Verify hooks at M1 with one material before scaling out; shaders authored in WESL from day one. |
@@ -610,7 +643,9 @@ move into `xtask` at M0 so the numbers are re-derived rather than trusted.
 3. How much ambient/spawn policy was script-driven (R4).
 4. Framerate coupling: confirm which subsystems are frame-stepped in the original (R3).
 5. Full TXD raster-format histogram — how much of 182.6 MB is BC1 vs. needs decode.
-6. DFF vertex attribute encodings and the meaning of `0x50E` / `0x105` (R7).
+6. **DFF geometry layout** — done 2026-10-27 (§4.12): decoded, byte-verified on all 6,505 geometries
+   and gated by the census. What remains is the `0x50E` / `0x105` extension chunks, which are optional
+   extras rather than part of the vertex data.
 7. `sfx.RAW` codec (PCM vs. ADPCM) and the `.adf` container verdict (R6).
 8. `Cullzone.dat` binary layout, and the `cull.ipl` record layout against it (both are cull zones).
 9. `models/coll/peds.col` body layout — the one collision file that does not match the map format
