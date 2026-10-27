@@ -354,6 +354,27 @@ So the answer to R4 is narrower than feared: peds are data-driven end to end, an
 
 That makes the file **redundant for us**: the decoded text form is easier to verify (§4.14), so M2 reads `cull.ipl` and this file stays a cross-check rather than a dependency.
 
+### 4.18 The cook: both asset halves verified on the whole corpus
+
+M1's asset side is done. `vc_cook` turns decoded data into artifacts a GPU takes as-is, and both
+halves are verified against every shipped asset rather than a sample:
+
+| Half | Verification |
+|---|---|
+| **Meshes** | All 6,505 geometries decode to **2,207,246 triangles and 2,818,890 vertices** — exactly the declared totals — with zero out-of-range indices and zero non-finite positions |
+| **Textures** | All 11,997 cook with zero failures into **179,522,336 bytes**: 10,824 BC1, 1,149 BC3, 24 expanded to RGBA8. Mip chains are split on the per-level length prefix; block data is never decoded |
+
+Two accounting notes worth keeping, because both look like bugs otherwise:
+
+- Cooked bytes **exceed** the source by 539,712. Paletted rasters grow four-fold when expanded to
+  `RGBA8`, which more than pays for the mip length prefixes the cooker strips. Both totals are gated
+  so the difference stays explained.
+- **BC2 versus BC3 is settled: they are BC3.** The two are indistinguishable by size, but 80.4% of the
+  16-byte-block textures open with an equal alpha-endpoint pair — the DXT5 signature for mostly-opaque
+  data, where DXT3's raw nibbles would manage it about 0.4% of the time.
+
+What M1 still needs is the runtime: a Bevy app that streams these artifacts and draws them.
+
 ### 4.13 Timecyc: decoded, and the draw distance varies with weather
 
 `vc_timecyc` reads all 168 rows with no failures, and the column order the file's own header names
