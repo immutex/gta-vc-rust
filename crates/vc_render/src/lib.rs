@@ -299,9 +299,15 @@ impl MaterialCache {
 
         let clear = texture.is_some_and(|texture| texture.alpha == AlphaClass::Blend);
         let mask = texture.is_some_and(|texture| texture.alpha == AlphaClass::Mask);
-        let image = texture
-            .and_then(|texture| textures.handle(texture))
-            .unwrap_or_else(|| textures.flat());
+        // Diagnostic: drop every texture so a black area can be told apart from a black
+        // image - unlit geometry stays black, a dark texture turns white.
+        let image = if std::env::var_os("VC_NO_TEXTURES").is_some() {
+            textures.flat()
+        } else {
+            texture
+                .and_then(|texture| textures.handle(texture))
+                .unwrap_or_else(|| textures.flat())
+        };
 
         let material = StandardMaterial {
             base_color: Color::WHITE,

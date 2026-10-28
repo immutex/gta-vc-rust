@@ -115,6 +115,10 @@ pub struct LightPoint {
 impl WorldPlan {
     /// Filters a loaded map and fixes its rotations.
     #[must_use]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the filter, the chunk assignment and the light collection read better together than apart"
+    )]
     pub fn new(world: World, effects: &[vc_world::Effect], sense: Sense) -> Self {
         let definitions: HashMap<u32, ObjectDefinition> = world
             .definitions
@@ -144,6 +148,9 @@ impl WorldPlan {
         // Diagnostic: render every placement, including interiors and shells, so a filter
         // can be ruled in or out by looking at the coverage.
         let keep_all = std::env::var_os("VC_KEEP_ALL").is_some();
+        // Vice City bakes its shadows as black quads. If they are drawing opaque they
+        // cover whole streets, so dropping them by name is how that gets tested.
+        let drop_shadow_quads = std::env::var_os("VC_NO_SHADOW_MODELS").is_some();
         let mut instances = Vec::with_capacity(world.instances.len());
         let (mut dropped_lod, mut dropped_interior, mut dropped_unknown) = (0, 0, 0);
 
@@ -153,6 +160,10 @@ impl WorldPlan {
 
                 continue;
             };
+
+            if drop_shadow_quads && definition.model.to_ascii_lowercase().contains("shad") {
+                continue;
+            }
 
             if keep_all {
                 instances.push(corrected(instance, sense));

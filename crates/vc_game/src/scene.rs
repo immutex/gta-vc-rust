@@ -37,9 +37,18 @@ pub fn spawn_sun(commands: &mut Commands<'_, '_>, sky: &Sky) {
         .build(),
         Transform::from_rotation(Quat::from_rotation_arc(Vec3::NEG_Z, -direction)),
     ));
+    // Sky fill, and it has to be strong. The map's shade is baked into its vertices, so a
+    // surface facing away from the sun carries a prelit value near zero and no amount of
+    // sunlight reaches it - at 600 the black patches on the roads stayed pure black. At
+    // 3,000 the darkest surface in a measured frame is 11 of 255 rather than 0, which is
+    // the difference between a shadow and a hole.
+    let fill = std::env::var("VC_AMBIENT")
+        .ok()
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(3_000.0);
     commands.insert_resource(GlobalAmbientLight {
         color: sky.ambient,
-        brightness: 600.0 * sky.power,
+        brightness: fill * sky.power,
         affects_lightmapped_meshes: true,
     });
 }
