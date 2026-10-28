@@ -131,7 +131,7 @@ pub struct Baked {
 /// an image another model already uploaded.
 #[derive(Default, Resource)]
 pub struct TextureCache {
-    uploaded: HashMap<String, Handle<Image>>,
+    uploaded: HashMap<TextureKey, Handle<Image>>,
     flat: Option<Handle<Image>>,
 }
 
@@ -155,8 +155,25 @@ impl TextureCache {
             .collect();
         let built = generate_parallel(&pending);
 
+        let mut collisions = 0usize;
+
         for (texture, image) in pending.into_iter().zip(built) {
+            let name = texture.name.to_ascii_lowercase();
+            let entry = self.uploaded.get(&key_of(texture));
+
+            if entry.is_none()
+                && self.uploaded.keys().any(|(other, width, height)| {
+                    *other == name && (*width != texture.width || *height != texture.height)
+                })
+            {
+                collisions += 1;
+            }
+
             let _ = self.uploaded.insert(key_of(texture), images.add(image));
+        }
+
+        if collisions > 0 && std::env::var_os("VC_TEXTURE_REPORT").is_some() {
+            println!("textures: {collisions} share a name at another size");
         }
     }
 
@@ -189,8 +206,20 @@ impl TextureCache {
     }
 }
 
-fn key_of(texture: &CookedTexture) -> String {
-    texture.name.to_ascii_lowercase()
+/// What a texture is cached by.
+///
+/// Not the name alone: Vice City ships several textures under one name at different
+/// resolutions, in different dictionaries, and keying on the name hands whichever loaded
+/// first to every surface that asks for it - which shows up as a wall painted with
+/// another building's pattern.
+type TextureKey = (String, u16, u16);
+
+fn key_of(texture: &CookedTexture) -> TextureKey {
+    (
+        texture.name.to_ascii_lowercase(),
+        texture.width,
+        texture.height,
+    )
 }
 
 fn generate_parallel(textures: &[&Arc<CookedTexture>]) -> Vec<Image> {
@@ -278,7 +307,7 @@ fn white_image() -> Image {
 /// One material per texture name and alpha behaviour.
 #[derive(Default, Resource)]
 pub struct MaterialCache {
-    materials: HashMap<(String, AlphaClass), Handle<StandardMaterial>>,
+    materials: HashMap<(TextureKey, AlphaClass), Handle<StandardMaterial>>,
 }
 
 impl MaterialCache {
@@ -289,7 +318,7 @@ impl MaterialCache {
         textures: &TextureCache,
         materials: &mut Assets<StandardMaterial>,
     ) -> Handle<StandardMaterial> {
-        let key = texture.map_or((String::new(), AlphaClass::Opaque), |texture| {
+        let key = texture.map_or(((String::new(), 0, 0), AlphaClass::Opaque), |texture| {
             (key_of(texture), texture.alpha)
         });
 
@@ -378,7 +407,7 @@ struct Vertex {
 /// Accumulates model geometry for one chunk and emits one mesh per texture.
 #[derive(Default)]
 pub struct Batcher {
-    buckets: HashMap<(String, AlphaClass), Bucket>,
+    buckets: HashMap<(TextureKey, AlphaClass), Bucket>,
     remap: Vec<u32>,
 }
 
@@ -426,7 +455,7 @@ impl Batcher {
         placement: &Placement,
         to_linear: &[f32; 256],
     ) {
-        let key = texture.map_or((String::new(), AlphaClass::Opaque), |texture| {
+        let key = texture.map_or(((String::new(), 0, 0), AlphaClass::Opaque), |texture| {
             (key_of(texture), texture.alpha)
         });
         let bucket = self.buckets.entry(key).or_insert_with(|| Bucket {
