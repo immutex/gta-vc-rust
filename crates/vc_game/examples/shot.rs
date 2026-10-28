@@ -219,7 +219,23 @@ fn capture(
 
     // The save observer writes the file on this thread; once it is there the readback
     // is complete and the app can stop.
-    if *frames > WARMUP_FRAMES && std::path::Path::new(&shot.path).exists() {
+    let written = std::path::Path::new(&shot.path);
+
+    if *frames > WARMUP_FRAMES && written.exists() {
+        println!(
+            "wrote {} ({} bytes)",
+            shot.path,
+            std::fs::metadata(written).map_or(0, |meta| meta.len())
+        );
         exit.write(AppExit::Success);
+    }
+
+    // Without this the capture waits forever, which reads like a hang rather than a
+    // failure; naming the frame it gave up on says which half of the path broke.
+    if *frames > WARMUP_FRAMES * 40 {
+        eprintln!("never wrote {} after {} frames", shot.path, *frames);
+        exit.write(AppExit::Error(
+            std::num::NonZero::new(1).unwrap_or_else(|| unreachable!()),
+        ));
     }
 }
