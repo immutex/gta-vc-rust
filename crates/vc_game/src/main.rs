@@ -195,10 +195,6 @@ fn setup_world(
     );
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "each argument is a distinct asset collection or cache"
-)]
 fn spawn_water(
     commands: &mut Commands<'_, '_>,
     streamer: &mut Streamer,

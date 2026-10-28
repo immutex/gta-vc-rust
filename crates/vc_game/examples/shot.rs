@@ -171,12 +171,7 @@ fn setup_camera(
     mut standard: ResMut<'_, Assets<StandardMaterial>>,
     mut meshes: ResMut<'_, Assets<Mesh>>,
 ) {
-    let mut image = Image::new_target_texture(
-        800,
-        450,
-        TextureFormat::Rgba8UnormSrgb,
-        None,
-    );
+    let mut image = Image::new_target_texture(800, 450, TextureFormat::Rgba8UnormSrgb, None);
     image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
     let handle = images.add(image);
     commands.insert_resource(Target(handle.clone()));
@@ -195,6 +190,10 @@ fn setup_camera(
     ));
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are taken by value by design"
+)]
 fn capture(
     mut commands: Commands<'_, '_>,
     mut frames: Local<'_, u32>,

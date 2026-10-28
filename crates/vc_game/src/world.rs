@@ -112,7 +112,10 @@ impl WorldPlan {
                 // A shell with no detail counterpart is the only copy of that object,
                 // so dropping it leaves a hole. The island shells are the exception:
                 // they are coarse stand-ins for whole blocks that are drawn in detail.
-                let orphan = !definition.model.to_ascii_lowercase().starts_with("islandlod")
+                let orphan = !definition
+                    .model
+                    .to_ascii_lowercase()
+                    .starts_with("islandlod")
                     && !detail
                         .iter()
                         .any(|detail| near(&detail.position, &instance.position));
@@ -463,10 +466,22 @@ mod tests {
     }
 
     #[test]
-    fn drops_lod_placements() {
+    fn keeps_a_shell_that_has_no_detail_counterpart() {
         let plan = WorldPlan::new(world(vec![instance(2, "LODroad", 0, [0.0; 3])]));
 
-        assert_eq!(plan.instances.len(), 0);
+        assert_eq!(plan.instances.len(), 1);
+        assert_eq!(plan.dropped_lod, 0);
+    }
+
+    #[test]
+    fn drops_a_shell_that_duplicates_detail_geometry() {
+        let plan = WorldPlan::new(world(vec![
+            instance(1, "road", 0, [0.0; 3]),
+            instance(2, "LODroad", 0, [0.0; 3]),
+        ]));
+
+        assert_eq!(plan.instances.len(), 1);
+        assert_eq!(plan.instances[0].definition_id, 1);
         assert_eq!(plan.dropped_lod, 1);
     }
 

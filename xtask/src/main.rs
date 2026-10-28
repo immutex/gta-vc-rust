@@ -16,7 +16,7 @@ mod physics;
 mod stream;
 mod verify;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
@@ -140,6 +140,18 @@ fn check() -> Result<()> {
     run("cargo", &["deny", "check"])?;
 
     Ok(())
+}
+
+/// Where cargo writes build output, honouring the environment override.
+pub(crate) fn target_dir() -> PathBuf {
+    std::env::var_os("CARGO_TARGET_DIR").map_or_else(
+        || {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .map_or_else(|| PathBuf::from("target"), |root| root.join("target"))
+        },
+        PathBuf::from,
+    )
 }
 
 fn run(program: &str, args: &[&str]) -> Result<()> {

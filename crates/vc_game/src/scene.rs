@@ -3,8 +3,11 @@
 use bevy::camera::Hdr;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::light::CascadeShadowConfigBuilder;
-use bevy::pbr::{DistanceFog, FogFalloff};
+use bevy::pbr::{
+    DistanceFog, FogFalloff, ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel,
+};
 use bevy::prelude::*;
+use bevy::render::view::Msaa;
 
 use crate::camera::FlyCamMarker;
 use crate::sky::Sky;
@@ -19,12 +22,15 @@ pub fn spawn_sun(commands: &mut Commands<'_, '_>, sky: &Sky) {
             shadow_maps_enabled: true,
             ..DirectionalLight::default()
         },
+        // Two cascades over 250 m rather than four over 600: the world is prelit, so
+        // shadows read as contact detail near the player, and the extra cascades cost a
+        // full redraw of every visible chunk.
         CascadeShadowConfigBuilder {
-            num_cascades: 4,
+            num_cascades: 2,
             minimum_distance: 1.0,
-            maximum_distance: 600.0,
-            first_cascade_far_bound: 45.0,
-            overlap_proportion: 0.2,
+            maximum_distance: 250.0,
+            first_cascade_far_bound: 40.0,
+            overlap_proportion: 0.15,
         }
         .build(),
         Transform::from_rotation(Quat::from_rotation_arc(Vec3::NEG_Z, -direction)),
@@ -47,6 +53,13 @@ pub fn world_camera(eye: Vec3, target: Vec3, sky: &Sky, camera: Camera) -> impl 
         Hdr,
         Tonemapping::AcesFitted,
         DebandDither::Enabled,
+        // The city is dense, angular geometry, which is exactly what contact occlusion
+        // is for; MSAA off pays for it at 1080p.
+        Msaa::Off,
+        ScreenSpaceAmbientOcclusion {
+            quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
+            ..ScreenSpaceAmbientOcclusion::default()
+        },
         Projection::from(PerspectiveProjection {
             near: 0.1,
             far: 12_000.0,

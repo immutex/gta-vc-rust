@@ -448,6 +448,11 @@ or BC2 (a bounding-box quantiser, mean channel error 1.1/255 on a decode-encode 
 uploaded as sRGB with 8× anisotropy. The whole corpus is 105 MB compressed with mips; the map only
 references 3,135 of them.
 
+**Geometry with no normals.** 461 vertices across the map ship a zero-length normal, and a zero
+normal shades black under a real sun whatever the albedo — a second, smaller source of the black
+patches above. The batcher now fills any missing normal with the area-weighted normal of the
+triangles using it, so `examples/bake` reports **zero normals: 0** instead of 461.
+
 **Known gap.** 7,622 merged draws across the whole map is above §6's 1,500-draw worst-case target.
 Frustum culling normally leaves three to four thousand visible, which a 5060 carries at 1080p, but
 the target needs texture atlasing or meshlet-style indirect draws. That is the next rendering task,
@@ -457,6 +462,36 @@ not a regression hidden by a smaller view.
 and prints the counts above, which is how the LOD, interior and normal fixes were checked.
 `examples/shot.rs` renders a frame to an image through Vulkan's lavapipe, which is slow but needs no
 display server.
+
+### 4.26 Modern lighting and draw budget
+
+The resident renderer lights the map physically: a directional sun from `timecyc` with two shadow
+cascades over 250 units, an ambient term from the same row, HDR with ACES tonemapping, and screen
+space ambient occlusion. Cascades were cut from four to two and from 600 to 250 units because the
+world is prelit — shadows read as contact detail near the player, and every extra cascade redraws
+every visible chunk.
+
+Fill is halved by culling back faces on everything except blended surfaces, which are the ones
+genuinely drawn from both sides. MSAA is off to pay for the occlusion pass.
+
+**Draw budget.** 7,622 merged draws for the whole map, three to four thousand after frustum
+culling. That is above §6's 1,500-draw target; the remaining work is texture atlasing or indirect
+meshlet draws, not more entities.
+
+### 4.27 Cross-referencing rotations against the game's own LOD shells: negative result
+
+The island LOD meshes are the original's baked copy of the same blocks that are placed in detail, so
+they looked like the ground truth for the rotation convention: a detail building under the correct
+reading should sit on the LOD surface.
+
+Measured against `IslandLODmainland`, `IslandLODbeach`, `IslandLOD1` and `IslandLOD2`, sampling 300
+detail instances each: **both readings land ~54 units from the nearest LOD vertex, and 1% within
+2.5 units.** The shells are decimated to a few thousand vertices across a whole island, so vertex
+spacing dwarfs any rotation error; the test cannot see the difference and was removed rather than
+kept as dead tooling.
+
+The convention is therefore settled the way §4.25 records: by the lamp arms themselves, which need no
+external reference because the data carries both the arm and the road.
 
 ### 4.23 Collision: parsed, loaded, and not yet wired in
 

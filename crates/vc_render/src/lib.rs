@@ -309,8 +309,14 @@ impl MaterialCache {
             } else {
                 AlphaMode::Opaque
             },
-            cull_mode: None,
-            double_sided: true,
+            // Blended surfaces are the ones drawn from both sides - foliage cards and
+            // decals - and back-face culling everything else halves the fill.
+            cull_mode: if clear {
+                None
+            } else {
+                Some(bevy::render::render_resource::Face::Back)
+            },
+            double_sided: clear,
             ..StandardMaterial::default()
         };
 
@@ -462,9 +468,10 @@ impl Batcher {
             .buckets
             .into_values()
             .filter(|bucket| !bucket.indices.is_empty())
-            .map(|bucket| {
+            .map(|mut bucket| {
                 triangles += bucket.indices.len() / 3;
                 vertices += bucket.vertices.len();
+                repair_normals(&mut bucket);
                 let mut mesh = Mesh::new(
                     PrimitiveTopology::TriangleList,
                     RenderAssetUsages::RENDER_WORLD,
@@ -543,6 +550,50 @@ fn srgb_table() -> &'static [f32; 256] {
     })
 }
 
+/// Fills in normals the data does not carry.
+///
+/// 461 vertices across the map ship a zero-length normal, and a zero normal under a
+/// real sun shades black regardless of albedo. Each such corner takes the
+/// area-weighted normal of the triangles that use it.
+fn repair_normals(bucket: &mut Bucket) {
+    let missing: Vec<usize> = bucket
+        .vertices
+        .iter()
+        .enumerate()
+        .filter(|(_, vertex)| vertex.normal.length_squared() < 1e-6)
+        .map(|(index, _)| index)
+        .collect();
+
+    if missing.is_empty() {
+        return;
+    }
+
+    let mut computed = vec![Vec3::ZERO; bucket.vertices.len()];
+
+    for triangle in bucket.indices.as_chunks::<3>().0 {
+        let [a, b, c] = [
+            bucket.vertices[triangle[0] as usize].position,
+            bucket.vertices[triangle[1] as usize].position,
+            bucket.vertices[triangle[2] as usize].position,
+        ];
+        let normal = (b - a).cross(c - a);
+
+        for index in triangle {
+            computed[*index as usize] += normal;
+        }
+    }
+
+    for index in missing {
+        let normal = computed[index];
+
+        bucket.vertices[index].normal = if normal.length_squared() > 1e-12 {
+            normal.normalize()
+        } else {
+            Vec3::Y
+        };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -614,7 +665,9 @@ mod tests {
         assert_eq!(baked.vertices, 12);
         assert_eq!(baked.parts.len(), 1);
 
-        let mesh = meshes.get(&baked.parts[0].mesh).unwrap_or_else(|| unreachable!());
+        let mesh = meshes
+            .get(&baked.parts[0].mesh)
+            .unwrap_or_else(|| unreachable!());
         let Some(Indices::U32(indices)) = mesh.indices() else {
             unreachable!("a merged mesh is indexed");
         };
