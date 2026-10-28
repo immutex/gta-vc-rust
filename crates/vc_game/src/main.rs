@@ -46,6 +46,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     let sky = Sky::load(&root.path().join("data/timecyc.dat"), options.hour)?;
+    // Cells differ a lot in how good a first view they give: the shoreline ones read as a
+    // city floating over water, and the densest are interiors. These were checked by
+    // rendering them.
+    if options.cell.is_none() {
+        println!("cell 0 1 gives a street view, 1 1 the waterfront, 0 -5 the beach");
+    }
     println!(
         "sky: {} at {}h, fog {:.0}..{:.0}, sun power {:.2}",
         sky.weather, sky.hour, sky.fog_start, sky.fog_end, sky.power
