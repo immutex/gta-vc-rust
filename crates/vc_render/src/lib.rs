@@ -130,7 +130,7 @@ pub struct Baked {
 #[derive(Default, Resource)]
 pub struct TextureCache {
     uploaded: HashMap<String, Handle<Image>>,
-    white: Option<Handle<Image>>,
+    flat: Option<Handle<Image>>,
 }
 
 impl TextureCache {
@@ -139,8 +139,8 @@ impl TextureCache {
     /// Chain generation is the expensive part of loading and is pure arithmetic, so
     /// it runs across every core while the asset inserts stay on this thread.
     pub fn upload_batch(&mut self, textures: &[Arc<CookedTexture>], images: &mut Assets<Image>) {
-        if self.white.is_none() {
-            self.white = Some(images.add(white_image()));
+        if self.flat.is_none() {
+            self.flat = Some(images.add(flat_image()));
         }
 
         let mut seen = std::collections::HashSet::new();
@@ -164,10 +164,14 @@ impl TextureCache {
         self.uploaded.get(&key_of(texture)).cloned()
     }
 
-    /// One white texel, for materials whose colour lives in the vertex data.
+    /// One mid-grey texel, for groups that name no texture.
+    ///
+    /// White is the wrong fallback: a missing texture then reads as a hole punched in
+    /// the world, which is what the pale patches on the beach were. Grey keeps the
+    /// surface solid and lets the prelit shade do the work.
     #[must_use]
-    pub fn white(&self) -> Handle<Image> {
-        self.white.clone().unwrap_or_default()
+    pub fn flat(&self) -> Handle<Image> {
+        self.flat.clone().unwrap_or_default()
     }
 
     /// How many textures are resident.
@@ -252,7 +256,7 @@ fn image_for(texture: &CookedTexture) -> Image {
     image
 }
 
-fn white_image() -> Image {
+fn flat_image() -> Image {
     let mut image = Image::new(
         Extent3d {
             width: 1,
@@ -260,7 +264,7 @@ fn white_image() -> Image {
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        vec![255, 255, 255, 255],
+        vec![158, 158, 158, 255],
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::RENDER_WORLD,
     );
@@ -295,7 +299,7 @@ impl MaterialCache {
         let mask = texture.is_some_and(|texture| texture.alpha == AlphaClass::Mask);
         let image = texture
             .and_then(|texture| textures.handle(texture))
-            .unwrap_or_else(|| textures.white());
+            .unwrap_or_else(|| textures.flat());
 
         let material = StandardMaterial {
             base_color: Color::WHITE,
@@ -309,14 +313,11 @@ impl MaterialCache {
             } else {
                 AlphaMode::Opaque
             },
-            // Blended surfaces are the ones drawn from both sides - foliage cards and
-            // decals - and back-face culling everything else halves the fill.
-            cull_mode: if clear {
-                None
-            } else {
-                Some(bevy::render::render_resource::Face::Back)
-            },
-            double_sided: clear,
+            // Both sides. The map's winding is not reliable enough to cull - a back-face
+            // discard reads as a hole in the ground - so fill savings must come from
+            // atlasing rather than from culling.
+            cull_mode: None,
+            double_sided: true,
             ..StandardMaterial::default()
         };
 
