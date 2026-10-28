@@ -535,44 +535,8 @@ fn place(offset: [f32; 3], rotation: [f32; 4], position: [f32; 3]) -> [f32; 3] {
 }
 
 fn load_world(directory: &Path) -> Result<(World, Vec<vc_world::Effect>)> {
-    let mut world = World::default();
-    let mut effects = Vec::new();
-    let mut paths = Vec::new();
-    collect(directory, &mut paths)?;
-
-    for path in &paths {
-        let bytes = std::fs::read(path)?;
-        let text = String::from_utf8_lossy(&bytes);
-
-        match path.extension().and_then(|found| found.to_str()) {
-            Some("ide") => {
-                world
-                    .definitions
-                    .extend(vc_world::parse_definitions(&text)?);
-                effects.extend(vc_world::parse_effects(&text)?);
-            }
-            Some("ipl") => world.instances.extend(vc_world::parse_instances(&text)?),
-            _ => {}
-        }
-    }
-
+    let (mut world, effects) = crate::worlds::load_with_effects(directory)?;
     world.instances.retain(|instance| instance.interior <= 0);
+
     Ok((world, effects))
-}
-
-fn collect(directory: &Path, out: &mut Vec<std::path::PathBuf>) -> Result<()> {
-    for entry in std::fs::read_dir(directory)? {
-        let path = entry?.path();
-
-        if path.is_dir() {
-            collect(&path, out)?;
-        } else if matches!(
-            path.extension().and_then(|found| found.to_str()),
-            Some("ide" | "ipl")
-        ) {
-            out.push(path);
-        }
-    }
-
-    Ok(())
 }

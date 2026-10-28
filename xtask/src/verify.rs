@@ -16,7 +16,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use vc_stream::{Colliders, Streamer};
 use vc_transport::{GameRoot, ImageArchive};
 use vc_world::{CellKey, ObjectDefinition, World};
@@ -273,42 +273,7 @@ fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
 }
 
 fn load_world(directory: &Path) -> Result<World> {
-    let mut world = World::default();
-    let mut paths = Vec::new();
-    collect(directory, &mut paths)?;
-
-    for path in &paths {
-        let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-        let text = String::from_utf8_lossy(&bytes);
-
-        match path.extension().and_then(|found| found.to_str()) {
-            Some("ide") => world
-                .definitions
-                .extend(vc_world::parse_definitions(&text)?),
-            Some("ipl") => world.instances.extend(vc_world::parse_instances(&text)?),
-            _ => {}
-        }
-    }
-
-    world.instances.retain(|instance| instance.interior <= 0);
-    Ok(world)
-}
-
-fn collect(directory: &Path, out: &mut Vec<std::path::PathBuf>) -> Result<()> {
-    for entry in std::fs::read_dir(directory)? {
-        let path = entry?.path();
-
-        if path.is_dir() {
-            collect(&path, out)?;
-        } else if matches!(
-            path.extension().and_then(|found| found.to_str()),
-            Some("ide" | "ipl")
-        ) {
-            out.push(path);
-        }
-    }
-
-    Ok(())
+    crate::worlds::load(directory)
 }
 
 /// Prints, for the worst offenders, whether applying the frame hierarchy helps.

@@ -15,6 +15,7 @@ mod models;
 mod physics;
 mod stream;
 mod verify;
+mod worlds;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
