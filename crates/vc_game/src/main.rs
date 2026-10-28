@@ -12,6 +12,7 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::input::mouse::MouseMotion;
 use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::*;
@@ -103,6 +104,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         .add_systems(Startup, move |mut commands: Commands<'_, '_>| {
             commands.spawn((
                 Camera3d::default(),
+                // Vice City had no HDR pipeline: the texture colour is the colour.
+                Tonemapping::None,
                 Transform::from_translation(
                     to_bevy_position(centre) + Vec3::new(-120.0, 55.0, 0.0),
                 )
