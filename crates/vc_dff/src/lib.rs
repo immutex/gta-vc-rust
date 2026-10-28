@@ -574,6 +574,10 @@ pub struct MaterialRef {
     pub alpha_mask: String,
 }
 
+/// Bytes per frame in a frame list: a 3x3 rotation, a position, a parent index and
+/// a matrix flags word.
+pub const FRAME_BYTES: usize = 56;
+
 /// A geometry with the materials its triangles index into.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClumpGeometry {
@@ -581,6 +585,112 @@ pub struct ClumpGeometry {
     pub decoded: DecodedGeometry,
     /// Material slots, in the order the triangles index them.
     pub materials: Vec<MaterialRef>,
+}
+
+/// One frame of a clump's hierarchy: a rotation and a position, relative to its parent.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Frame {
+    /// Rotation matrix, row-major.
+    pub rotation: [[f32; 3]; 3],
+    /// Position relative to the parent frame.
+    pub position: [f32; 3],
+    /// Parent frame, or -1 at the root.
+    pub parent: i32,
+}
+
+/// One atomic: a geometry attached to a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AtomicRef {
+    /// Frame the geometry hangs from.
+    pub frame: u32,
+    /// Geometry it draws.
+    pub geometry: u32,
+}
+
+/// A clump's geometry together with the hierarchy that positions it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DecodedClump {
+    /// Geometries, in list order.
+    pub geometries: Vec<ClumpGeometry>,
+    /// Frames, root first.
+    pub frames: Vec<Frame>,
+    /// Atomics, in list order.
+    pub atomics: Vec<AtomicRef>,
+}
+
+impl DecodedClump {
+    /// Rotation and position of every geometry, in model space.
+    ///
+    /// A geometry's own vertices are in its frame's space, so this is the transform
+    /// that has to be applied before the instance's. Ignoring it is what leaves street
+    /// lights standing apart from their posts and signs rotated against their frames.
+    pub fn geometry_transforms(&self) -> Vec<([[f32; 3]; 3], [f32; 3])> {
+        let mut transforms = vec![(identity(), [0.0; 3]); self.geometries.len()];
+
+        for atomic in &self.atomics {
+            let Some(slot) = transforms.get_mut(atomic.geometry as usize) else {
+                continue;
+            };
+
+            *slot = self.frame_transform(atomic.frame, 0);
+        }
+
+        transforms
+    }
+
+    fn frame_transform(&self, frame: u32, depth: u8) -> ([[f32; 3]; 3], [f32; 3]) {
+        let Some(current) = self.frames.get(frame as usize) else {
+            return (identity(), [0.0; 3]);
+        };
+
+        if current.parent < 0 || depth > 32 {
+            return (current.rotation, current.position);
+        }
+
+        let (parent_rotation, parent_position) =
+            self.frame_transform(current.parent as u32, depth + 1);
+
+        (
+            multiply(parent_rotation, current.rotation),
+            add(parent_position, rotate(parent_rotation, current.position)),
+        )
+    }
+}
+
+/// Identity rotation.
+pub const fn identity() -> [[f32; 3]; 3] {
+    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+}
+
+/// Matrix product `a * b`, both row-major.
+pub(crate) fn multiply(a: [[f32; 3]; 3], b: [[f32; 3]; 3]) -> [[f32; 3]; 3] {
+    let mut out = [[0.0; 3]; 3];
+
+    for row in 0..3 {
+        for column in 0..3 {
+            out[row][column] = (0..3).map(|k| a[row][k] * b[k][column]).sum();
+        }
+    }
+
+    out
+}
+
+#[expect(
+    clippy::suboptimal_flops,
+    reason = "textbook matrix arithmetic reads better than mul_add chains"
+)]
+/// Applies a rotation matrix to a point.
+pub fn rotate(m: [[f32; 3]; 3], p: [f32; 3]) -> [f32; 3] {
+    [
+        m[0][0] * p[0] + m[0][1] * p[1] + m[0][2] * p[2],
+        m[1][0] * p[0] + m[1][1] * p[1] + m[1][2] * p[2],
+        m[2][0] * p[0] + m[2][1] * p[1] + m[2][2] * p[2],
+    ]
+}
+
+/// Adds two points.
+pub fn add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 }
 
 /// Reads a geometry's material slots.
@@ -644,6 +754,93 @@ fn printable(section: &Section<'_>) -> Option<String> {
     }
 
     Some(String::from_utf8_lossy(text).into_owned())
+}
+
+/// Reads the frame hierarchy and the atomics that attach geometry to it.
+///
+/// # Errors
+/// Propagates [`StreamError`] for a malformed tree.
+pub fn read_hierarchy(root: &Section<'_>) -> Result<(Vec<Frame>, Vec<AtomicRef>), DffError> {
+    let mut frames = Vec::new();
+
+    if let Some(frame_list) = root.child(SectionKind::FRAME_LIST)?
+        && let Some(structure) = frame_list.child(SectionKind::STRUCT)?
+    {
+        let payload = structure.payload();
+        let count = read_u32(payload, 0)? as usize;
+
+        for index in 0..count {
+            let at = 4 + index * FRAME_BYTES;
+
+            if at + FRAME_BYTES > payload.len() {
+                break;
+            }
+
+            frames.push(Frame {
+                rotation: [
+                    [
+                        read_f32(payload, at)?,
+                        read_f32(payload, at + 4)?,
+                        read_f32(payload, at + 8)?,
+                    ],
+                    [
+                        read_f32(payload, at + 12)?,
+                        read_f32(payload, at + 16)?,
+                        read_f32(payload, at + 20)?,
+                    ],
+                    [
+                        read_f32(payload, at + 24)?,
+                        read_f32(payload, at + 28)?,
+                        read_f32(payload, at + 32)?,
+                    ],
+                ],
+                position: [
+                    read_f32(payload, at + 36)?,
+                    read_f32(payload, at + 40)?,
+                    read_f32(payload, at + 44)?,
+                ],
+                parent: read_u32(payload, at + 48)?.cast_signed(),
+            });
+        }
+    }
+
+    let mut atomics = Vec::new();
+
+    for atomic in root.children_of(SectionKind::ATOMIC)? {
+        if let Some(structure) = atomic.child(SectionKind::STRUCT)? {
+            let payload = structure.payload();
+
+            if payload.len() >= 8 {
+                atomics.push(AtomicRef {
+                    frame: read_u32(payload, 0)?,
+                    geometry: read_u32(payload, 4)?,
+                });
+            }
+        }
+    }
+
+    Ok((frames, atomics))
+}
+
+/// Every geometry in a clump with its materials and hierarchy, decoded.
+///
+/// # Errors
+/// As [`decode_clump_with_materials`], plus any frame list that does not parse.
+pub fn decode_clump_geometry(bytes: &[u8]) -> Result<DecodedClump, DffError> {
+    let root = Section::root(bytes)?;
+
+    if root.kind() != SectionKind::CLUMP {
+        return Err(DffError::UnexpectedRoot { kind: root.kind() });
+    }
+
+    let geometries = decode_clump_with_materials(bytes)?;
+    let (frames, atomics) = read_hierarchy(&root)?;
+
+    Ok(DecodedClump {
+        geometries,
+        frames,
+        atomics,
+    })
 }
 
 /// Every geometry in a clump with its materials, decoded.

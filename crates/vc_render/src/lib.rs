@@ -39,6 +39,28 @@ pub struct VcUniforms {
     pub tint: Vec4,
     /// Above zero, texels with alpha below half are discarded.
     pub cutout: f32,
+    /// Light that reaches surfaces regardless of their baked shade.
+    pub ambient: Vec4,
+    /// Multiplier for the baked shade, which already contains the original's sun.
+    pub sun: Vec4,
+}
+
+/// How the world is lit: an ambient floor plus a gain on the baked prelit shade.
+#[derive(Clone, Copy, Debug)]
+pub struct Lighting {
+    /// Ambient colour, added to the prelit shade.
+    pub ambient: Vec4,
+    /// Gain applied to the prelit shade.
+    pub sun: Vec4,
+}
+
+impl Default for Lighting {
+    fn default() -> Self {
+        Self {
+            ambient: Vec4::ONE,
+            sun: Vec4::ONE,
+        }
+    }
 }
 
 /// A `RenderWare`-flavoured material: one texture, one tint.
@@ -63,6 +85,8 @@ impl Default for VcMaterial {
             uniforms: VcUniforms {
                 tint: Vec4::ONE,
                 cutout: 0.0,
+                ambient: Vec4::ZERO,
+                sun: Vec4::ONE,
             },
             cutout: false,
         }
@@ -100,6 +124,9 @@ impl Material for VcMaterial {
             Mesh::ATTRIBUTE_COLOR.at_shader_location(5),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
+        // Vice City's signage, railings and foliage are single quads seen from both
+        // sides; culling the back face makes them vanish as the camera swings round.
+        descriptor.primitive.cull_mode = None;
 
         Ok(())
     }
@@ -166,6 +193,7 @@ pub struct ModelPart {
 /// Uploads a cooked model into Bevy assets.
 pub fn upload_model(
     model: &CookedModel,
+    lighting: Lighting,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<VcMaterial>,
     images: &mut Assets<Image>,
@@ -243,6 +271,8 @@ pub fn upload_model(
                     uniforms: VcUniforms {
                         tint: Vec4::ONE,
                         cutout: if cutout { 1.0 } else { 0.0 },
+                        ambient: lighting.ambient,
+                        sun: lighting.sun,
                     },
                     cutout,
                 }),

@@ -138,7 +138,7 @@ impl Streamer {
                 return Err(error);
             }
         };
-        let geometries = match vc_dff::decode_clump_with_materials(bytes) {
+        let clump = match vc_dff::decode_clump_geometry(bytes) {
             Ok(geometries) => geometries,
             Err(error) => {
                 self.stats.failures += 1;
@@ -150,7 +150,9 @@ impl Streamer {
             }
         };
 
-        let resolved: Vec<Vec<Option<Arc<CookedTexture>>>> = geometries
+        let transforms = clump.geometry_transforms();
+        let resolved: Vec<Vec<Option<Arc<CookedTexture>>>> = clump
+            .geometries
             .iter()
             .map(|geometry| {
                 geometry
@@ -161,7 +163,12 @@ impl Streamer {
             })
             .collect();
 
-        let model = Arc::new(build_model(&geometries, &resolved, &mut self.stats));
+        let model = Arc::new(build_model(
+            &clump.geometries,
+            &transforms,
+            &resolved,
+            &mut self.stats,
+        ));
 
         self.stats.models += 1;
         let _ = self
@@ -324,25 +331,38 @@ impl Streamer {
 
 fn build_model(
     geometries: &[ClumpGeometry],
+    transforms: &[([[f32; 3]; 3], [f32; 3])],
     resolved: &[Vec<Option<Arc<CookedTexture>>>],
     stats: &mut StreamStats,
 ) -> CookedModel {
     let mut meshes = Vec::with_capacity(geometries.len());
 
-    for (geometry, textures) in geometries.iter().zip(resolved) {
+    for (index, (geometry, textures)) in geometries.iter().zip(resolved).enumerate() {
         if geometry.decoded.triangles.is_empty() || geometry.decoded.vertices.is_empty() {
             continue;
         }
+
+        // A geometry's vertices are in its own frame's space, so the frame transform is
+        // applied here and baked in. Without it every part of a multi-part model sits
+        // at the model origin instead of where the hierarchy puts it.
+        let (rotation, position) = transforms
+            .get(index)
+            .copied()
+            .unwrap_or((vc_dff::identity(), [0.0; 3]));
 
         let vertices: Vec<SceneVertex> = geometry
             .decoded
             .vertices
             .iter()
-            .map(|vertex| SceneVertex {
-                position: vertex.position,
-                normal: vertex.normal,
-                uv: vertex.texcoords,
-                colour: vertex.colour,
+            .map(|vertex| {
+                let moved = vc_dff::add(vc_dff::rotate(rotation, vertex.position), position);
+
+                SceneVertex {
+                    position: moved,
+                    normal: vc_dff::rotate(rotation, vertex.normal),
+                    uv: vertex.texcoords,
+                    colour: vertex.colour,
+                }
             })
             .collect();
 
@@ -501,7 +521,13 @@ mod tests {
         )];
 
         let resolved = vec![vec![None; geometries[0].materials.len()]];
-        let model = build_model(&geometries, &resolved, &mut StreamStats::default());
+        let identity = vec![(vc_dff::identity(), [0.0; 3]); geometries.len()];
+        let model = build_model(
+            &geometries,
+            &identity,
+            &resolved,
+            &mut StreamStats::default(),
+        );
 
         assert_eq!(model.meshes.len(), 1);
         assert_eq!(model.meshes[0].groups.len(), 2);
@@ -515,7 +541,13 @@ mod tests {
         let geometries = vec![geometry(0, &[(0, [0, 1, 2])])];
 
         let resolved = vec![vec![None; geometries[0].materials.len()]];
-        let model = build_model(&geometries, &resolved, &mut StreamStats::default());
+        let identity = vec![(vc_dff::identity(), [0.0; 3]); geometries.len()];
+        let model = build_model(
+            &geometries,
+            &identity,
+            &resolved,
+            &mut StreamStats::default(),
+        );
 
         assert_eq!(model.meshes[0].groups.len(), 1);
         assert!(model.meshes[0].groups[0].texture.is_none());
@@ -526,7 +558,13 @@ mod tests {
         let geometries = vec![geometry(1, &[(7, [0, 1, 2])])];
 
         let resolved = vec![vec![None; geometries[0].materials.len()]];
-        let model = build_model(&geometries, &resolved, &mut StreamStats::default());
+        let identity = vec![(vc_dff::identity(), [0.0; 3]); geometries.len()];
+        let model = build_model(
+            &geometries,
+            &identity,
+            &resolved,
+            &mut StreamStats::default(),
+        );
 
         assert_eq!(model.meshes[0].groups.len(), 1);
         assert_eq!(model.meshes[0].groups[0].indices.len(), 3);

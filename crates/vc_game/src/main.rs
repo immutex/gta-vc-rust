@@ -13,12 +13,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::diagnostic::DiagnosticsStore;
 use bevy::input::mouse::MouseMotion;
 use bevy::pbr::{DistanceFog, FogFalloff, MeshMaterial3d};
 use bevy::prelude::*;
 use vc_physics::{Placement, StaticWorld};
 use vc_render::{
-    ModelPart, TextureCache, VcMaterial, VcRenderPlugin, to_bevy_position, upload_model,
+    Lighting, ModelPart, TextureCache, VcMaterial, VcRenderPlugin, to_bevy_position, upload_model,
 };
 use vc_stream::{Colliders, Streamer};
 use vc_timecyc::Timecycle;
@@ -65,28 +66,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         world.instances.len()
     );
 
-    // Interiors are a separate streaming problem; the outside world comes first.
-    // LOD shells are dropped: every one of them is a duplicate of geometry that is
-    // also placed in detail, and drawing both is what made surfaces overlap.
-    let mut definitions: HashMap<u32, ObjectDefinition> =
-        HashMap::with_capacity(world.definitions.len());
-    for definition in world.definitions {
-        let _ = definitions.insert(definition.id, definition);
-    }
-
-    let world = World {
-        definitions: Vec::new(),
-        instances: world
-            .instances
-            .into_iter()
-            .filter(|instance| instance.interior <= 0)
-            .filter(|instance| {
-                definitions
-                    .get(&instance.definition_id)
-                    .is_none_or(|definition| !is_lod(&definition.model))
-            })
-            .collect(),
-    };
+    let (world, definitions) = prepare(world);
 
     let grid = CellGrid::build(&world, CELL_SIZE);
     let start = grid.busiest().ok_or("the map holds no placements")?;
@@ -107,6 +87,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         sky.weather, sky.hour, sky.far_clip, sky.fog_start
     );
 
+    // The baked shade is the original's sun, so it is kept at unity and the ambient
+    // term does the lifting. 0.3 is roughly the fill a modern renderer would add and
+    // is what makes the shadows readable without washing out the baked contrast.
+    let fill = |channel: f32| channel.mul_add(1.6 / 255.0, 0.10);
+    let sun = sky.directional[0]
+        .max(sky.directional[1])
+        .max(sky.directional[2])
+        .mul_add(0.9 / 255.0, 0.55);
+    let lighting = Lighting {
+        ambient: Vec4::new(
+            fill(sky.ambient[0]),
+            fill(sky.ambient[1]),
+            fill(sky.ambient[2]),
+            1.0,
+        ),
+        sun: Vec4::splat(sun),
+    };
+
     let collision = CollisionSet(Colliders::load(&archive));
 
     App::new()
@@ -121,6 +119,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             ..default()
         }))
         .add_plugins(VcRenderPlugin)
+        .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
+        .add_plugins(bevy::diagnostic::EntityCountDiagnosticsPlugin::default())
         .insert_resource(ClearColor(sky.clear))
         .insert_resource(Stream {
             streamer: warmed(archive),
@@ -147,7 +147,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .insert_resource(Spawn(centre))
         .insert_resource(collision)
-        .add_systems(Startup, setup_scene)
+        .insert_resource(WorldLighting(lighting))
+        .add_systems(Startup, (setup_scene, spawn_hud))
+        .add_systems(Update, update_hud)
         .add_systems(
             Update,
             (look, fly_camera, walk_player, stream_cells, report).chain(),
@@ -160,6 +162,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 /// Collision models, wrapped so the streaming crate stays free of Bevy types.
 #[derive(Resource)]
 struct CollisionSet(Colliders);
+
+/// Marks the diagnostics text so only it is rewritten each frame.
+#[derive(Component)]
+struct Hud;
+
+/// The world's lighting, wrapped so systems can read it as one value.
+#[derive(Resource, Clone, Copy)]
+struct WorldLighting(Lighting);
 
 /// Where the camera starts, in game space.
 #[derive(Resource, Clone, Copy)]
@@ -307,6 +317,73 @@ fn fly_camera(
     }
 }
 
+/// Keeps only what the runtime draws: the outside world, without LOD shells.
+///
+/// Interiors are a separate streaming problem. LOD models are dropped because every
+/// one of them duplicates geometry that is also placed in detail, and drawing both is
+/// what made surfaces overlap.
+fn prepare(world: World) -> (World, HashMap<u32, ObjectDefinition>) {
+    let mut definitions: HashMap<u32, ObjectDefinition> =
+        HashMap::with_capacity(world.definitions.len());
+    for definition in world.definitions {
+        let _ = definitions.insert(definition.id, definition);
+    }
+
+    let instances = world
+        .instances
+        .into_iter()
+        .filter(|instance| instance.interior <= 0)
+        .filter(|instance| {
+            definitions
+                .get(&instance.definition_id)
+                .is_none_or(|definition| !is_lod(&definition.model))
+        })
+        .collect();
+
+    (
+        World {
+            definitions: Vec::new(),
+            instances,
+        },
+        definitions,
+    )
+}
+
+/// Registers collision for one placed instance, if the install models it.
+///
+/// One collider per model, referenced by every instance of it, so the city's
+/// collision costs a few megabytes rather than a few hundred.
+fn place_collision(
+    stream: &mut Stream,
+    colliders: &CollisionSet,
+    definition: &ObjectDefinition,
+    instance: &vc_world::Instance,
+) {
+    let Some(collider) = colliders.0.get(&definition.model) else {
+        return;
+    };
+
+    let index = if let Some(&known) = stream.colliders.get(&definition.model) {
+        known
+    } else {
+        let added = stream.physics.add_collider(collider.clone());
+        let _ = stream.colliders.insert(definition.model.clone(), added);
+
+        added
+    };
+    let (min, max) = collider.bounds();
+
+    stream.physics.place(
+        index,
+        Placement {
+            position: instance.position,
+            rotation: instance.rotation,
+            scale: instance.scale,
+        },
+        (min, max),
+    );
+}
+
 /// Streams the cells around the camera and spawns what they place.
 #[expect(
     clippy::needless_pass_by_value,
@@ -323,6 +400,7 @@ fn stream_cells(
     mut textures: ResMut<'_, TextureCache>,
     root: Res<'_, WorldRoot>,
     colliders: Res<'_, CollisionSet>,
+    lighting: Res<'_, WorldLighting>,
 ) {
     let Ok(transform) = camera.single() else {
         return;
@@ -371,6 +449,7 @@ fn stream_cells(
                 if let Ok(model) = stream.streamer.model(&definition) {
                     let parts = upload_model(
                         &model,
+                        lighting.0,
                         &mut meshes,
                         &mut materials,
                         &mut images,
@@ -421,29 +500,7 @@ fn stream_cells(
                 spawned_this_frame += 1;
             }
 
-            // Collision for the same instance, when the install models it. One collider
-            // per model, referenced by every instance of it.
-            if let Some(collider) = colliders.0.get(&definition.model) {
-                let index = if let Some(&known) = stream.colliders.get(&definition.model) {
-                    known
-                } else {
-                    let added = stream.physics.add_collider(collider.clone());
-                    let _ = stream.colliders.insert(definition.model.clone(), added);
-
-                    added
-                };
-                let (min, max) = collider.bounds();
-
-                stream.physics.place(
-                    index,
-                    Placement {
-                        position: instance.position,
-                        rotation: instance.rotation,
-                        scale: instance.scale,
-                    },
-                    (min, max),
-                );
-            }
+            place_collision(&mut stream, &colliders, &definition, &instance);
         }
 
         if complete {
@@ -594,6 +651,8 @@ struct Sky {
     fog_start: f32,
     far_clip: f32,
     water: [f32; 4],
+    ambient: [f32; 3],
+    directional: [f32; 3],
 }
 
 fn load_sky(path: &Path) -> Result<Sky, Box<dyn Error>> {
@@ -616,6 +675,8 @@ fn load_sky(path: &Path) -> Result<Sky, Box<dyn Error>> {
         fog_start: hour.fog_start,
         far_clip: hour.far_clip,
         water: hour.water,
+        ambient: hour.ambient,
+        directional: hour.directional,
     })
 }
 
@@ -699,6 +760,62 @@ fn setup_scene(
     ));
 }
 
+/// Top-left readout: frame rate, frame time and what the streamer is holding.
+///
+/// GPU utilisation is not portable, and without it a single "GPU %" would be a
+/// guess; frame time is the honest number, and it is what the budget is spent in.
+fn spawn_hud(mut commands: Commands<'_, '_>) {
+    commands.spawn((
+        Text::new("vc-rs"),
+        TextFont {
+            font_size: bevy::text::FontSize::Px(13.0),
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(8.0),
+            left: Val::Px(8.0),
+            ..default()
+        },
+        Hud,
+    ));
+}
+
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are taken by value by design"
+)]
+fn update_hud(
+    diagnostics: Res<'_, DiagnosticsStore>,
+    stream: Res<'_, Stream>,
+    mut hud: Query<'_, '_, &mut Text, With<Hud>>,
+) {
+    let Ok(mut text) = hud.single_mut() else {
+        return;
+    };
+
+    let fps = diagnostics
+        .get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FPS)
+        .and_then(bevy::diagnostic::Diagnostic::smoothed)
+        .unwrap_or(0.0);
+    let frame_ms = diagnostics
+        .get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FRAME_TIME)
+        .and_then(bevy::diagnostic::Diagnostic::smoothed)
+        .unwrap_or(0.0);
+    let stats = stream.streamer.stats();
+
+    text.0 = format!(
+        "{fps:5.1} fps  {frame_ms:5.2} ms\ncells {}/{}  entities {}\nmodels {}  textures {}  failed {}",
+        stream.loaded.len(),
+        stream.grid.cell_count(),
+        stream.spawned,
+        stats.models,
+        stats.textures,
+        stream.failed,
+    );
+}
+
 /// Draws the ocean as one quad at the height and colour the game's data specifies.
 ///
 /// `data/water.dat` holds a single rectangle - x and y spanning ±3000 at z = 6.0 - and
@@ -755,6 +872,8 @@ fn spawn_water(
         uniforms: vc_render::VcUniforms {
             tint: Vec4::new(water[0] / 255.0, water[1] / 255.0, water[2] / 255.0, 1.0),
             cutout: 0.0,
+            ambient: Vec4::ZERO,
+            sun: Vec4::ONE,
         },
         cutout: false,
     });
