@@ -20,6 +20,7 @@ use bevy::image::ImageSampler;
 use bevy::pbr::{Material, MaterialPipeline, MaterialPipelineKey, MaterialPlugin};
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
+use bevy::render::render_resource::encase::ShaderType;
 use bevy::render::render_resource::{
     AsBindGroup, Extent3d, RenderPipelineDescriptor, SpecializedMeshPipelineError,
     TextureDimension, TextureFormat,
@@ -31,6 +32,15 @@ use vc_stream::CookedModel;
 /// Path of the material shader, relative to the asset root.
 pub const SHADER_PATH: &str = "shaders/vc_material.wesl";
 
+/// Values the fragment shader reads for a material.
+#[derive(Clone, Debug, ShaderType)]
+pub struct VcUniforms {
+    /// Colour multiplier.
+    pub tint: Vec4,
+    /// Above zero, texels with alpha below half are discarded.
+    pub cutout: f32,
+}
+
 /// A `RenderWare`-flavoured material: one texture, one tint.
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 pub struct VcMaterial {
@@ -38,10 +48,11 @@ pub struct VcMaterial {
     #[texture(0)]
     #[sampler(1)]
     pub diffuse: Option<Handle<Image>>,
-    /// Colour multiplier.
+    /// Shader uniforms.
     #[uniform(2)]
-    pub tint: LinearRgba,
-    /// Whether to discard cut-out texels.
+    pub uniforms: VcUniforms,
+    /// Whether to discard cut-out texels. Kept beside the uniforms so `alpha_mode`
+    /// and the shader agree without allocating.
     pub cutout: bool,
 }
 
@@ -49,7 +60,10 @@ impl Default for VcMaterial {
     fn default() -> Self {
         Self {
             diffuse: None,
-            tint: LinearRgba::WHITE,
+            uniforms: VcUniforms {
+                tint: Vec4::ONE,
+                cutout: 0.0,
+            },
             cutout: false,
         }
     }
@@ -110,15 +124,12 @@ pub fn to_bevy_position(position: [f32; 3]) -> Vec3 {
     Vec3::new(position[0], position[2], -position[1])
 }
 
-/// Converts a rotation the same way: the axis moves, the angle does not.
-pub fn to_bevy_rotation(rotation: [f32; 4]) -> Quat {
-    Quat::from_xyzw(rotation[0], rotation[2], -rotation[1], rotation[3])
-}
-
 /// Keeps one GPU texture per cooked texture, however many models ask for it.
 #[derive(Default, Resource)]
 pub struct TextureCache {
-    uploaded: HashMap<usize, Handle<Image>>,
+    /// Keyed by allocation address, holding the `Arc` so no address can be recycled
+    /// while it is a key.
+    uploaded: HashMap<usize, (Arc<CookedTexture>, Handle<Image>)>,
 }
 
 impl TextureCache {
@@ -130,24 +141,16 @@ impl TextureCache {
     ) -> Handle<Image> {
         let key = Arc::as_ptr(texture) as usize;
 
-        if let Some(handle) = self.uploaded.get(&key) {
+        if let Some((_, handle)) = self.uploaded.get(&key) {
             return handle.clone();
         }
 
         let handle = images.add(upload_texture(texture));
-        let _ = self.uploaded.insert(key, handle.clone());
+        let _ = self
+            .uploaded
+            .insert(key, (Arc::clone(texture), handle.clone()));
 
         handle
-    }
-
-    /// How many textures have been uploaded.
-    pub fn len(&self) -> usize {
-        self.uploaded.len()
-    }
-
-    /// Whether nothing has been uploaded yet.
-    pub fn is_empty(&self) -> bool {
-        self.uploaded.is_empty()
     }
 }
 
@@ -215,7 +218,10 @@ pub fn upload_model(
                 mesh: meshes.add(built),
                 material: materials.add(VcMaterial {
                     diffuse,
-                    tint: LinearRgba::WHITE,
+                    uniforms: VcUniforms {
+                        tint: Vec4::ONE,
+                        cutout: if cutout { 1.0 } else { 0.0 },
+                    },
                     cutout,
                 }),
             });

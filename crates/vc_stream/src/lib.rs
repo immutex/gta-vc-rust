@@ -141,7 +141,7 @@ impl Streamer {
                 geometry
                     .materials
                     .iter()
-                    .map(|material| self.texture(&material.texture, &definition.txd))
+                    .map(|material| self.resolve(&material.texture, &definition.txd))
                     .collect()
             })
             .collect();
@@ -186,16 +186,35 @@ impl Streamer {
         self.global.len()
     }
 
+    /// Fetches one texture by dictionary and name, for callers outside model cooking.
+    pub fn texture(&mut self, txd: &str, name: &str) -> Option<Arc<CookedTexture>> {
+        let dictionary = self.dictionary(txd)?;
+        let key = name.to_ascii_lowercase();
+
+        dictionary
+            .get(&key)
+            .cloned()
+            .or_else(|| self.global.get(&key).cloned())
+    }
+
     /// Resolves a material's texture name.
     ///
     /// Vice City duplicates shared textures across many dictionaries and points a
     /// model at only one of them, so a miss walks the rest of the archive once and
     /// remembers the answer, including the misses.
-    fn texture(&mut self, name: &str, hint: &str) -> Option<Arc<CookedTexture>> {
+    fn resolve(&mut self, name: &str, hint: &str) -> Option<Arc<CookedTexture>> {
         let key = name.to_ascii_lowercase();
 
         if key.is_empty() || self.missing.contains(&key) {
             return None;
+        }
+
+        // The model's own dictionary wins: the same texture name exists at different
+        // resolutions in different dictionaries.
+        if let Some(dictionary) = self.dictionary(hint)
+            && let Some(found) = dictionary.get(&key)
+        {
+            return Some(Arc::clone(found));
         }
 
         if let Some(found) = self.global.get(&key) {

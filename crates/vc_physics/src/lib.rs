@@ -151,8 +151,16 @@ impl StaticWorld {
     }
 
     /// Places a collision model. `bounds` is the model's own bounding box, in model
-    /// space; it is offset by the placement to decide which cells the instance spans.
+    /// space; it is transformed by the placement so a rotated or scaled instance is
+    /// registered where it actually sits.
+    ///
+    /// Does nothing when `collider` names no collider or the grid has no cell size,
+    /// both of which would otherwise produce a wrong index or an unbounded loop.
     pub fn place(&mut self, collider: usize, placement: Placement, bounds: ([f32; 3], [f32; 3])) {
+        if collider >= self.colliders.len() || self.cell <= 0.0 {
+            return;
+        }
+
         let placement_index = self.placements.len();
         self.placements.push(placement);
 
@@ -162,18 +170,37 @@ impl StaticWorld {
             placement: placement_index,
         });
 
-        let cell = self.cell;
-        let min = [
-            bounds.0[0].min(bounds.1[0]) * 1.0 + placement.position[0],
-            bounds.0[1].min(bounds.1[1]) + placement.position[1],
-        ];
-        let max = [
-            bounds.0[0].max(bounds.1[0]) + placement.position[0],
-            bounds.0[1].max(bounds.1[1]) + placement.position[1],
-        ];
+        let (mut min, mut max) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
 
-        for x in cell_range(min[0], max[0], cell) {
-            for y in cell_range(min[1], max[1], cell) {
+        for corner in 0..8 {
+            let point = [
+                if corner & 1 == 0 {
+                    bounds.0[0]
+                } else {
+                    bounds.1[0]
+                },
+                if corner & 2 == 0 {
+                    bounds.0[1]
+                } else {
+                    bounds.1[1]
+                },
+                if corner & 4 == 0 {
+                    bounds.0[2]
+                } else {
+                    bounds.1[2]
+                },
+            ];
+            let world = placement.transform(point);
+
+            for axis in 0..3 {
+                min[axis] = min[axis].min(world[axis]);
+                max[axis] = max[axis].max(world[axis]);
+            }
+        }
+
+        // The grid is indexed by ground position, so only x and y matter here.
+        for x in cell_range(min[0], max[0], self.cell) {
+            for y in cell_range(min[1], max[1], self.cell) {
                 self.grid.entry((x, y)).or_default().push(instance);
             }
         }
@@ -197,8 +224,12 @@ impl StaticWorld {
         let mut best: Option<f32> = None;
 
         for instance in self.near(point) {
-            let collider = &self.colliders[instance.collider];
-            let placement = self.placements[instance.placement];
+            let (Some(collider), Some(placement)) = (
+                self.colliders.get(instance.collider),
+                self.placements.get(instance.placement),
+            ) else {
+                continue;
+            };
 
             for face in &collider.faces {
                 let Some(a) = collider.vertices.get(usize::from(face.indices[0])) else {
@@ -247,8 +278,12 @@ impl StaticWorld {
         let mut nearest = reach;
 
         for instance in self.near(point) {
-            let collider = &self.colliders[instance.collider];
-            let placement = self.placements[instance.placement];
+            let (Some(collider), Some(placement)) = (
+                self.colliders.get(instance.collider),
+                self.placements.get(instance.placement),
+            ) else {
+                continue;
+            };
 
             for face in &collider.faces {
                 let Some(a) = collider.vertices.get(usize::from(face.indices[0])) else {
@@ -274,7 +309,11 @@ impl StaticWorld {
         nearest
     }
 
-    fn near(&self, point: [f32; 3]) -> impl Iterator<Item = &Instance> {
+    fn near(&self, point: [f32; 3]) -> Vec<&Instance> {
+        if self.cell <= 0.0 {
+            return Vec::new();
+        }
+
         let key = (
             (point[0] / self.cell).floor() as i32,
             (point[1] / self.cell).floor() as i32,
@@ -295,7 +334,8 @@ impl StaticWorld {
 
         instances
             .into_iter()
-            .filter_map(move |index| self.instances.get(index as usize))
+            .filter_map(|index| self.instances.get(index as usize))
+            .collect()
     }
 }
 

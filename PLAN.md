@@ -349,6 +349,38 @@ city is not mirrored — a reflection would look almost right and be subtly, per
 Physics stays in the game's own axes, because collision data is authored there; only the render
 boundary converts.
 
+### 4.24 A review pass: six bugs, and the facts behind the foliage
+
+Two reviewers were set on the runtime: one auditing the code, one establishing what the install says
+about water and level-of-detail. Both found things worth recording.
+
+**Bugs that made the picture wrong:**
+
+| Bug | Effect |
+|---|---|
+| Streaming indexed a game-space grid with a Bevy-space camera position | Y (altitude) was read as north. The island is 18 cells deep and the runtime only ever streamed a column around z = 0 |
+| Budget-limited cells restarted from their first instance | Hundreds of models spawned repeatedly at identical transforms |
+| `AlphaMode::Mask` was inert for a custom material | Bevy discards alpha only in its own fragment path, so no cut-out ever happened: every palm and tree was a solid card |
+| LOD shells drawn beside the detail they duplicate | **1,115 placements (12.2%)** overlapping real geometry |
+| Texture cache keyed by address without holding the `Arc` | A recycled address could return a different image |
+| Physics `place` bucketed by translation only | Rotated and scaled instances were registered where they are not |
+
+**Water, from the data.** `data/water.dat` holds exactly one rectangle: `x, y ∈ [−3000, 3000]` at
+**z = 6.0**. `WATERPRO.DAT` duplicates that and adds nothing recoverable. The texture is
+`waterclear256` from `particle.txd`, and the tint is `timecyc.dat`'s last column — `WaterRGBA`, 46
+distinct values across weather and hour. Pool and river water are separate map geometry, not this plane.
+The ocean now renders as one quad at that height with that texture and tint.
+
+**Level-of-detail, from the data.** There is **no flag** for LODs: the IDE flags column cannot separate
+them (bit `0x100` appears on 43 ordinary models), the IPL has no LOD field, and all 9,114 placements
+carry the same thirteen values. The only reliable rule is the name — 1,082 of 4,131 models contain
+"lod", and no non-LOD model does.
+
+**Vegetation, from the data.** Palms and trees are **meshes, not billboards**: `veg_palmbig14` is 88
+triangles over 49 vertices spanning 16.6 × 17.0 × 18.3 units, built from mirrored pairs of flat cards.
+They are collidable-free and their textures live in `generic.txd` and `gtatrees.txd` with alpha masks,
+which is why the cut-out fix matters more than any other single change to how the city looks.
+
 ### 4.23 Collision: parsed, loaded, and not yet wired in
 
 `vc_physics` holds static collision as *references*: a cell stores which collider sits where, and a

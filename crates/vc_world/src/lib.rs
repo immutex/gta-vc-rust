@@ -120,9 +120,13 @@ fn parse_definition(line: &str) -> Result<ObjectDefinition, WorldError> {
     // section adds: a `tobj` carries its on and off times before the flags. Reading
     // the draw distance at index 4 and the flags from the end covers both.
     let draw_distance = number::<f32>(fields[4], 4)?;
-    let flags = fields
-        .last()
-        .map_or(Ok(0), |field| number::<u32>(field, fields.len() - 1))?;
+    // Flags are the last field in both sections: `objs` ends with them, and `tobj`
+    // puts its on and off times before them. A line too short to carry a flag word is
+    // treated as having none rather than reading the draw distance as flags.
+    let flags = match fields.last() {
+        Some(field) if fields.len() >= 6 => number::<u32>(field, fields.len() - 1)?,
+        _ => 0,
+    };
 
     Ok(ObjectDefinition {
         id: number::<u32>(fields[0], 0)?,
@@ -311,10 +315,12 @@ impl CellGrid {
     }
 
     /// The most densely placed cell, which is a reasonable place to start.
+    ///
+    /// Ties break on the key so the start point is the same on every run.
     pub fn busiest(&self) -> Option<CellKey> {
         self.cells
             .iter()
-            .max_by_key(|(_, instances)| instances.len())
+            .max_by_key(|(key, instances)| (instances.len(), std::cmp::Reverse(**key)))
             .map(|(key, _)| *key)
     }
 
@@ -335,7 +341,7 @@ impl CellGrid {
             }
         }
 
-        keys.sort_by_key(|key| (key.x - centre.x).pow(2) + (key.y - centre.y).pow(2));
+        keys.sort_by_key(|key| ((key.x - centre.x).pow(2) + (key.y - centre.y).pow(2), *key));
 
         keys
     }

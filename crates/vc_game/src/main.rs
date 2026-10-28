@@ -48,23 +48,31 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     // Interiors are a separate streaming problem; the outside world comes first.
+    // LOD shells are dropped: every one of them is a duplicate of geometry that is
+    // also placed in detail, and drawing both is what made surfaces overlap.
+    let mut definitions: HashMap<u32, ObjectDefinition> =
+        HashMap::with_capacity(world.definitions.len());
+    for definition in world.definitions {
+        let _ = definitions.insert(definition.id, definition);
+    }
+
     let world = World {
-        definitions: world.definitions,
+        definitions: Vec::new(),
         instances: world
             .instances
             .into_iter()
-            .filter(|instance| instance.interior == 0)
+            .filter(|instance| instance.interior <= 0)
+            .filter(|instance| {
+                definitions
+                    .get(&instance.definition_id)
+                    .is_none_or(|definition| !is_lod(&definition.model))
+            })
             .collect(),
     };
 
     let grid = CellGrid::build(&world, CELL_SIZE);
     let start = grid.busiest().ok_or("the map holds no placements")?;
     let centre = start.centre(CELL_SIZE);
-
-    let mut definitions = HashMap::with_capacity(world.definitions.len());
-    for definition in world.definitions {
-        let _ = definitions.insert(definition.id, definition);
-    }
 
     println!(
         "cells: {} across the map, starting in ({}, {}) with {} placements",
@@ -100,6 +108,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             instances: world.instances,
             grid,
             loaded: HashSet::new(),
+            cursors: HashMap::new(),
             uploaded: HashMap::new(),
             spawned: 0,
             failed: 0,
@@ -108,54 +117,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             yaw: 0.0,
             pitch: -0.25,
         })
-        .add_systems(Startup, move |mut commands: Commands<'_, '_>| {
-            // Every model's vertices are in the game's Z-up axes, so the whole world
-            // hangs off one rotated root instead of converting each vertex or each
-            // instance. The camera stays outside the hierarchy and converts its own
-            // position, which keeps the two consistent.
-            // GlobalTransform has to be present explicitly: a parent without it makes
-            // every child log B0004, and Bevy stops propagating their transforms.
-            let root = commands
-                .spawn((
-                    Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-                    GlobalTransform::default(),
-                    Visibility::default(),
-                    WorldRootMarker,
-                ))
-                .id();
-            commands.insert_resource(WorldRoot(root));
-
-            commands.spawn((
-                Camera3d::default(),
-                // Vice City had no HDR pipeline: the texture colour is the colour.
-                Tonemapping::None,
-                Projection::from(PerspectiveProjection {
-                    near: 0.1,
-                    // The fog ends as far as 2000 units out; clipping sooner would
-                    // cut geometry before it dissolved into the sky.
-                    far: 3000.0,
-                    ..default()
-                }),
-                DistanceFog {
-                    color: sky.clear,
-                    falloff: FogFalloff::Linear {
-                        start: sky.fog_start,
-                        end: sky.far_clip,
-                    },
-                    ..default()
-                },
-                Transform::from_translation(
-                    to_bevy_position(centre) + Vec3::new(-120.0, 55.0, 0.0),
-                )
-                .looking_at(to_bevy_position(centre), Vec3::Y),
-                FlyCamMarker,
-            ));
-        })
+        .insert_resource(sky)
+        .insert_resource(Spawn(centre))
+        .add_systems(Startup, setup_scene)
         .add_systems(Update, (fly_camera, stream_cells, report).chain())
         .run();
 
     Ok(())
 }
+
+/// Where the camera starts, in game space.
+#[derive(Resource, Clone, Copy)]
+struct Spawn([f32; 3]);
 
 #[derive(Resource)]
 struct Stream {
@@ -164,6 +137,7 @@ struct Stream {
     instances: Vec<vc_world::Instance>,
     grid: CellGrid,
     loaded: HashSet<CellKey>,
+    cursors: HashMap<CellKey, usize>,
     uploaded: HashMap<String, Vec<ModelPart>>,
     spawned: u64,
     failed: u64,
@@ -267,7 +241,11 @@ fn stream_cells(
         return;
     };
 
-    let centre = CellKey::of(transform.translation.to_array(), stream.grid.size());
+    // The camera lives in Bevy space (Y up); the grid is keyed in game space (Z up),
+    // where a cell is a patch of ground. Converting is the difference between
+    // streaming the island and streaming a column of air.
+    let at = transform.translation;
+    let centre = CellKey::of([at.x, -at.z, at.y], stream.grid.size());
     let wanted = stream.grid.within(centre, VIEW_RADIUS);
     let mut budget = MODELS_PER_FRAME;
 
@@ -278,9 +256,10 @@ fn stream_cells(
 
         let indices = stream.grid.instances(key).to_vec();
         let mut complete = true;
+        let start = stream.cursors.get(&key).copied().unwrap_or(0);
 
-        for index in indices {
-            let Some(instance) = stream.instances.get(index as usize).cloned() else {
+        for (position, index) in indices.iter().enumerate().skip(start) {
+            let Some(instance) = stream.instances.get(*index as usize).cloned() else {
                 continue;
             };
             let Some(definition) = stream.definitions.get(&instance.definition_id).cloned() else {
@@ -294,6 +273,7 @@ fn stream_cells(
             } else {
                 if budget == 0 {
                     complete = false;
+                    let _ = stream.cursors.insert(key, position);
 
                     break;
                 }
@@ -348,6 +328,7 @@ fn stream_cells(
 
         if complete {
             let _ = stream.loaded.insert(key);
+            let _ = stream.cursors.remove(&key);
         }
     }
 }
@@ -376,13 +357,15 @@ fn report(time: Res<'_, Time>, stream: Res<'_, Stream>, mut last: Local<'_, f32>
     );
 }
 
-/// The sky and fog for one hour of one weather type.
+/// The sky, fog and water for one hour of one weather type.
+#[derive(Resource)]
 struct Sky {
     weather: String,
     hour: usize,
     clear: Color,
     fog_start: f32,
     far_clip: f32,
+    water: [f32; 4],
 }
 
 fn load_sky(path: &Path) -> Result<Sky, Box<dyn Error>> {
@@ -404,12 +387,156 @@ fn load_sky(path: &Path) -> Result<Sky, Box<dyn Error>> {
         clear: linear_to_color(hour.sky_bottom),
         fog_start: hour.fog_start,
         far_clip: hour.far_clip,
+        water: hour.water,
     })
 }
 
 /// Timecyc colours are already linear, which is what Bevy's fog wants.
 const fn linear_to_color(rgb: [f32; 3]) -> Color {
     Color::LinearRgba(LinearRgba::new(rgb[0], rgb[1], rgb[2], 1.0))
+}
+
+/// Whether a model is a level-of-detail shell.
+///
+/// Vice City marks them by name only: 1,082 of the 4,131 models start with `lod` or
+/// end in `LOD`, and no other model contains that substring. There is no flag bit in
+/// the IDE or the IPL that separates them.
+fn is_lod(model: &str) -> bool {
+    model.to_ascii_lowercase().contains("lod")
+}
+
+#[expect(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    reason = "Bevy system parameters are taken by value by design, and each is a distinct resource or asset collection"
+)]
+fn setup_scene(
+    mut commands: Commands<'_, '_>,
+    spawn: Res<'_, Spawn>,
+    sky: Res<'_, Sky>,
+    mut stream: ResMut<'_, Stream>,
+    mut meshes: ResMut<'_, Assets<Mesh>>,
+    mut materials: ResMut<'_, Assets<VcMaterial>>,
+    mut images: ResMut<'_, Assets<Image>>,
+    mut textures: ResMut<'_, TextureCache>,
+) {
+    // Every model's vertices are in the game's Z-up axes, so the whole world hangs off
+    // one rotated root instead of converting each vertex or each instance. The camera
+    // stays outside the hierarchy and converts its own position, which keeps the two
+    // consistent. GlobalTransform and Visibility must be present explicitly: a parent
+    // without them makes every child log B0004 and stops propagation.
+    let root = commands
+        .spawn((
+            Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            GlobalTransform::default(),
+            Visibility::default(),
+            WorldRootMarker,
+        ))
+        .id();
+    commands.insert_resource(WorldRoot(root));
+
+    spawn_water(
+        &mut commands,
+        &mut stream.streamer,
+        &mut meshes,
+        &mut materials,
+        &mut images,
+        &mut textures,
+        root,
+        &sky,
+    );
+
+    commands.spawn((
+        Camera3d::default(),
+        // Vice City had no HDR pipeline: the texture colour is the colour.
+        Tonemapping::None,
+        Projection::from(PerspectiveProjection {
+            near: 0.1,
+            // The fog ends as far as 2000 units out; clipping sooner would cut
+            // geometry before it dissolved into the sky.
+            far: 3000.0,
+            ..default()
+        }),
+        DistanceFog {
+            color: sky.clear,
+            falloff: FogFalloff::Linear {
+                start: sky.fog_start,
+                end: sky.far_clip,
+            },
+            ..default()
+        },
+        Transform::from_translation(to_bevy_position(spawn.0) + Vec3::new(-120.0, 55.0, 0.0))
+            .looking_at(to_bevy_position(spawn.0), Vec3::Y),
+        FlyCamMarker,
+    ));
+}
+
+/// Draws the ocean as one quad at the height and colour the game's data specifies.
+///
+/// `data/water.dat` holds a single rectangle - x and y spanning ±3000 at z = 6.0 - and
+/// the texture comes from `particle.txd`. The tint is `timecyc.dat`'s water column, so
+/// the sea changes with weather and hour like everything else.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is a distinct Bevy resource or asset collection"
+)]
+fn spawn_water(
+    commands: &mut Commands<'_, '_>,
+    stream: &mut Streamer,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<VcMaterial>,
+    images: &mut Assets<Image>,
+    textures: &mut TextureCache,
+    root: Entity,
+    sky: &Sky,
+) {
+    let Some(texture) = stream.texture("particle", "waterclear256") else {
+        println!("water: waterclear256 not found, skipping the ocean");
+
+        return;
+    };
+
+    let extent = 3000.0;
+    let level = 6.0;
+    let tiles = 64.0;
+
+    let mut mesh = Mesh::new(
+        bevy::render::mesh::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_POSITION,
+        vec![
+            [-extent, -extent, level],
+            [extent, -extent, level],
+            [extent, extent, level],
+            [-extent, extent, level],
+        ],
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 4]);
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_UV_0,
+        vec![[0.0, 0.0], [tiles, 0.0], [tiles, tiles], [0.0, tiles]],
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0, 1.0, 1.0, 1.0]; 4]);
+    mesh.insert_indices(bevy::render::mesh::Indices::U32(vec![0, 1, 2, 0, 2, 3]));
+
+    let water = sky.water;
+    let material = materials.add(VcMaterial {
+        diffuse: Some(textures.handle(&texture, images)),
+        uniforms: vc_render::VcUniforms {
+            tint: Vec4::new(water[0] / 255.0, water[1] / 255.0, water[2] / 255.0, 1.0),
+            cutout: 0.0,
+        },
+        cutout: false,
+    });
+
+    let entity = commands
+        .spawn((Mesh3d(meshes.add(mesh)), MeshMaterial3d(material)))
+        .id();
+    commands.entity(entity).insert(ChildOf(root));
+
+    println!("water: {extent:.0} unit quad at z = {level}, tinted from timecyc");
 }
 
 fn warmed(archive: ImageArchive) -> Streamer {

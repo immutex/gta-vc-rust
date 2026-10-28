@@ -13,13 +13,24 @@ pub(crate) fn run(radius: i32) -> Result<()> {
     let archive = ImageArchive::open(&root.image())?;
     let world = load_world(&root.path().join("data/maps"))?;
 
+    let mut by_id = HashMap::with_capacity(world.definitions.len());
+    for definition in world.definitions {
+        let _ = by_id.insert(definition.id, definition);
+    }
+
+    // The same filter the runtime uses: outside world only, and no LOD shells.
     let world = World {
-        definitions: world.definitions,
         instances: world
             .instances
             .into_iter()
-            .filter(|instance| instance.interior == 0)
+            .filter(|instance| instance.interior <= 0)
+            .filter(|instance| {
+                by_id
+                    .get(&instance.definition_id)
+                    .is_none_or(|definition| !definition.model.to_ascii_lowercase().contains("lod"))
+            })
             .collect(),
+        definitions: by_id.values().cloned().collect(),
     };
 
     let grid = CellGrid::build(&world, CELL_SIZE);
