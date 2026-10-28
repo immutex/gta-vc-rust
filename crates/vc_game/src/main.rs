@@ -134,6 +134,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             instances: world.instances,
             grid,
             loaded: HashSet::new(),
+            cell_entities: HashMap::new(),
             cursors: HashMap::new(),
             uploaded: HashMap::new(),
             physics: StaticWorld::new(25.0),
@@ -156,10 +157,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         .insert_resource(WorldLighting(lighting))
         .insert_resource(RotationMode::default())
         .add_systems(Startup, (setup_scene, spawn_hud))
-        .add_systems(Update, update_hud)
         .add_systems(
             Update,
-            (look, fly_camera, walk_player, rebuild, stream_cells, report).chain(),
+            (
+                look,
+                fly_camera,
+                walk_player,
+                rebuild,
+                stream_cells,
+                update_hud,
+                report,
+            )
+                .chain(),
         )
         .run();
 
@@ -218,6 +227,9 @@ struct Stream {
     instances: Vec<vc_world::Instance>,
     grid: CellGrid,
     loaded: HashSet<CellKey>,
+    /// Entities spawned for each cell, so a cell that leaves the view can be released
+    /// instead of accumulating for the whole session.
+    cell_entities: HashMap<CellKey, Vec<Entity>>,
     cursors: HashMap<CellKey, usize>,
     uploaded: HashMap<String, Vec<ModelPart>>,
     physics: StaticWorld,
@@ -437,6 +449,34 @@ fn rebuild(
     }
 }
 
+/// Releases cells that are no longer within the view radius.
+///
+/// Models stay cooked, so flying back respawns them without touching the archive
+/// again; what is freed is the entities and the per-cell bookkeeping.
+fn unload_far_cells(commands: &mut Commands<'_, '_>, stream: &mut Stream, centre: CellKey) {
+    let wanted: HashSet<CellKey> = stream
+        .grid
+        .within(centre, VIEW_RADIUS)
+        .into_iter()
+        .collect();
+    let stale: Vec<CellKey> = stream
+        .loaded
+        .iter()
+        .copied()
+        .filter(|key| !wanted.contains(key))
+        .collect();
+
+    for key in stale {
+        if let Some(entities) = stream.cell_entities.remove(&key) {
+            for entity in entities {
+                commands.entity(entity).despawn();
+            }
+        }
+        let _ = stream.loaded.remove(&key);
+        let _ = stream.cursors.remove(&key);
+    }
+}
+
 /// Registers collision for one placed instance, if the install models it.
 ///
 /// One collider per model, referenced by every instance of it, so the city's
@@ -590,14 +630,18 @@ fn stream_cells(
                 .with_scale(Vec3::from(instance.scale));
 
             for part in &parts {
-                commands.spawn((
-                    Mesh3d(part.mesh.clone()),
-                    MeshMaterial3d(part.material.clone()),
-                    placed,
-                    ChildOf(root.0),
-                ));
+                let entity = commands
+                    .spawn((
+                        Mesh3d(part.mesh.clone()),
+                        MeshMaterial3d(part.material.clone()),
+                        placed,
+                        ChildOf(root.0),
+                    ))
+                    .id();
+                stream.cell_entities.entry(key).or_default().push(entity);
                 stream.spawned += 1;
                 spawned_this_frame += 1;
+                let _ = entity;
             }
 
             place_collision(&mut stream, &colliders, &definition, &instance);
@@ -608,6 +652,8 @@ fn stream_cells(
             let _ = stream.cursors.remove(&key);
         }
     }
+
+    unload_far_cells(&mut commands, &mut stream, centre);
 }
 
 /// Moves the player, in game coordinates, and puts the camera at their eye.
@@ -695,6 +741,7 @@ fn walk_player(
     player.on_ground = false;
 
     if let Some(height) = ground
+        && player.velocity.z <= 0.0
         && player.position.z <= height + 0.4
     {
         player.position.z = height;
@@ -823,6 +870,13 @@ fn setup_scene(
             WorldRootMarker,
         ))
         .id();
+    let static_root = commands
+        .spawn((
+            Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
     commands.insert_resource(WorldRoot(root));
 
     spawn_water(
@@ -832,7 +886,7 @@ fn setup_scene(
         &mut materials,
         &mut images,
         &mut textures,
-        root,
+        static_root,
         &sky,
     );
 
@@ -843,7 +897,7 @@ fn setup_scene(
         &mut materials,
         &mut images,
         &mut textures,
-        root,
+        static_root,
         spawn.0,
         &lighting.0,
     );
@@ -903,6 +957,7 @@ fn update_hud(
     diagnostics: Res<'_, DiagnosticsStore>,
     stream: Res<'_, Stream>,
     camera: Query<'_, '_, &Transform, With<FlyCamMarker>>,
+    live: Query<'_, '_, &ChildOf>,
     mut hud: Query<'_, '_, &mut Text, With<Hud>>,
 ) {
     let Ok(mut text) = hud.single_mut() else {
@@ -932,7 +987,7 @@ fn update_hud(
         "{fps:5.1} fps  {frame_ms:5.2} ms\ncells {}/{}  entities {}\nmodels {}  textures {}  failed {}\nat {:.0} {:.0} {:.0}  cell {} {}",
         stream.loaded.len(),
         stream.grid.cell_count(),
-        stream.spawned,
+        live.iter().count(),
         stats.models,
         stats.textures,
         stream.failed,
@@ -1008,7 +1063,7 @@ fn spawn_calibration(
         }
     }
 
-    println!("calibration: left = rotation as stored, right = conjugated");
+    println!("calibration: left of view = rotation as stored, right = conjugated");
 }
 
 #[expect(

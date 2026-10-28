@@ -296,10 +296,13 @@ pub fn upload_model(
             built.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
             built.insert_indices(Indices::U32(indices));
 
-            let diffuse = group
-                .texture
-                .as_ref()
-                .map(|texture| textures.handle(texture, images));
+            // A group with no resolved texture draws with flat grey rather than Bevy's
+            // white default, which read as a hole in the world; white patches on the
+            // beach were exactly this.
+            let diffuse = match group.texture.as_ref() {
+                Some(texture) => textures.handle(texture, images),
+                None => textures.flat_grey(images),
+            };
             let cutout = group
                 .texture
                 .as_ref()
@@ -308,7 +311,7 @@ pub fn upload_model(
             parts.push(ModelPart {
                 mesh: meshes.add(built),
                 material: materials.add(VcMaterial {
-                    diffuse,
+                    diffuse: Some(diffuse),
                     uniforms: VcUniforms {
                         tint: Vec4::ONE,
                         cutout: if cutout { 1.0 } else { 0.0 },
