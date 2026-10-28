@@ -90,7 +90,7 @@ pub struct LightPoint {
 impl WorldPlan {
     /// Filters a loaded map and fixes its rotations.
     #[must_use]
-    pub fn new(world: World, effects: &[vc_world::Effect]) -> Self {
+    pub fn new(world: World, effects: &[vc_world::Effect], sense: Sense) -> Self {
         let definitions: HashMap<u32, ObjectDefinition> = world
             .definitions
             .into_iter()
@@ -139,7 +139,7 @@ impl WorldPlan {
                         .any(|detail| near(&detail.position, &instance.position));
 
                 if orphan {
-                    instances.push(corrected(instance));
+                    instances.push(corrected(instance, sense));
                 } else {
                     dropped_lod += 1;
                 }
@@ -160,7 +160,7 @@ impl WorldPlan {
                 continue;
             }
 
-            instances.push(corrected(instance));
+            instances.push(corrected(instance, sense));
         }
 
         let mut chunks: BTreeMap<ChunkKey, Vec<u32>> = BTreeMap::new();
@@ -254,7 +254,11 @@ fn place(point: [f32; 3], position: [f32; 3], rotation: [f32; 4], scale: [f32; 3
 ///
 /// The shipped quaternion is the inverse of the rotation that was applied: lamp arms
 /// point at the carriageway only when it is conjugated.
-fn corrected(instance: &Instance) -> Instance {
+fn corrected(instance: &Instance, sense: Sense) -> Instance {
+    if sense == Sense::Stored {
+        return instance.clone();
+    }
+
     let mut instance = instance.clone();
     instance.rotation = [
         -instance.rotation[0],
@@ -264,6 +268,44 @@ fn corrected(instance: &Instance) -> Instance {
     ];
 
     instance
+}
+
+/// Which reading of the shipped quaternion to place instances with.
+///
+/// The data does not settle it: the lamp-arm test prefers [`Sense::Conjugated`] by a
+/// wide margin, yet the wrapped geometry of signs and shop fronts reads better to the
+/// eye under the other. It is a switch so a person can decide in one keypress.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Sense {
+    /// Apply the quaternion as authored.
+    ///
+    /// The default, because it is the literal reading of the file and because the
+    /// wrapped geometry of signs and shop fronts reads better under it by eye - the one
+    /// measurement that outranks a statistic. `R` flips to the other.
+    #[default]
+    Stored,
+    /// Apply its conjugate, the reading the lamp-arm test prefers.
+    Conjugated,
+}
+
+impl Sense {
+    /// The other reading.
+    #[must_use]
+    pub const fn flipped(self) -> Self {
+        match self {
+            Self::Stored => Self::Conjugated,
+            Self::Conjugated => Self::Stored,
+        }
+    }
+
+    /// Name for the log.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Stored => "as stored",
+            Self::Conjugated => "conjugated",
+        }
+    }
 }
 
 fn near(left: &[f32; 3], right: &[f32; 3]) -> bool {
@@ -399,12 +441,17 @@ pub fn spawn(commands: &mut Commands<'_, '_>, baked: BakedWorld, draw_distance: 
             part.bounds,
             Transform::IDENTITY,
             range.clone(),
+            BakedPart,
         ));
         if part.blend {
             entity.insert(bevy::light::NotShadowCaster);
         }
     }
 }
+
+/// Marks a spawned chunk mesh, so a rebuild can clear them.
+#[derive(Component)]
+pub struct BakedPart;
 
 /// Everything one bake produced, before it is spawned.
 pub struct BakedWorld {
@@ -685,7 +732,11 @@ mod tests {
 
     #[test]
     fn keeps_a_shell_that_has_no_detail_counterpart() {
-        let plan = WorldPlan::new(world(vec![instance(2, "LODroad", 0, [0.0; 3])]), &[]);
+        let plan = WorldPlan::new(
+            world(vec![instance(2, "LODroad", 0, [0.0; 3])]),
+            &[],
+            Sense::Conjugated,
+        );
 
         assert_eq!(plan.instances.len(), 1);
         assert_eq!(plan.dropped_lod, 0);
@@ -699,6 +750,7 @@ mod tests {
                 instance(2, "LODroad", 0, [0.0; 3]),
             ]),
             &[],
+            Sense::Conjugated,
         );
 
         assert_eq!(plan.instances.len(), 1);
@@ -714,6 +766,7 @@ mod tests {
                 instance(2, "LODroad", 0, [10.0, 20.0, 5.0]),
             ]),
             &[],
+            Sense::Conjugated,
         );
 
         assert_eq!(plan.instances.len(), 1);
@@ -722,7 +775,11 @@ mod tests {
 
     #[test]
     fn drops_a_real_interior() {
-        let plan = WorldPlan::new(world(vec![instance(1, "road", 4, [10.0, 20.0, 5.0])]), &[]);
+        let plan = WorldPlan::new(
+            world(vec![instance(1, "road", 4, [10.0, 20.0, 5.0])]),
+            &[],
+            Sense::Conjugated,
+        );
 
         assert_eq!(plan.instances.len(), 0);
         assert_eq!(plan.dropped_interior, 1);
@@ -733,7 +790,7 @@ mod tests {
         let mut instance = instance(1, "road", 0, [0.0; 3]);
         instance.rotation = [0.0, 0.0, 0.707_106_77, 0.707_106_77];
 
-        let plan = WorldPlan::new(world(vec![instance]), &[]);
+        let plan = WorldPlan::new(world(vec![instance]), &[], Sense::Conjugated);
 
         assert_eq!(plan.instances[0].rotation[2], -0.707_106_77);
         assert_eq!(plan.instances[0].rotation[3], 0.707_106_77);

@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     let (world, effects) = world::load(&root.path().join("data/maps"))?;
-    let plan = WorldPlan::new(world, &effects);
+    let plan = WorldPlan::new(world, &effects, vc_game::world::Sense::default());
     println!(
         "world: {} placements, {} LOD, {} interior, {} unknown dropped",
         plan.instances.len(),

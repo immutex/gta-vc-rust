@@ -34,7 +34,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("textures: {indexed} indexed");
 
     let (world, effects) = world::load(&root.path().join("data/maps"))?;
-    let plan = WorldPlan::new(world, &effects);
+    let sense = world::Sense::default();
+    println!("rotation sense: {}", sense.label());
+    let plan = WorldPlan::new(world.clone(), &effects, sense);
     println!(
         "world: {} placements ({} LOD, {} interior, {} unknown dropped)",
         plan.instances.len(),
@@ -81,6 +83,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         .init_resource::<MaterialCache>()
         .init_resource::<Stats>()
         .init_resource::<world::ActiveLights>()
+        .insert_resource(RawWorld(world))
+        .insert_resource(Sense(sense))
+        .insert_resource(Effects(effects))
         .add_systems(
             Startup,
             (setup_world, setup_lighting, setup_camera, hud::spawn),
@@ -90,6 +95,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             (
                 vc_game::camera::look,
                 world::update_lights,
+                flip_sense,
                 vc_game::camera::fly,
                 vc_game::camera::walk,
                 hud::update,
@@ -101,6 +107,61 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Re-bakes the world under the other rotation sense when R is pressed.
+///
+/// Rebaking is 2.3 s and keeps every cooked model and uploaded texture, which is far
+/// cheaper than guessing which reading the art was authored in.
+#[expect(
+    clippy::too_many_arguments,
+    clippy::needless_pass_by_value,
+    reason = "each argument is a distinct resource the bake needs; Bevy passes them by value"
+)]
+fn flip_sense(
+    mut commands: Commands<'_, '_>,
+    keys: Res<'_, ButtonInput<KeyCode>>,
+    mut sense: ResMut<'_, Sense>,
+    raw: Res<'_, RawWorld>,
+    effects: Res<'_, Effects>,
+    mut plan: ResMut<'_, WorldPlan>,
+    mut source: ResMut<'_, Source>,
+    colliders: Res<'_, ColliderSet>,
+    mut physics: ResMut<'_, Physics>,
+    mut textures: ResMut<'_, TextureCache>,
+    mut materials: ResMut<'_, MaterialCache>,
+    mut meshes: ResMut<'_, Assets<Mesh>>,
+    mut standard: ResMut<'_, Assets<StandardMaterial>>,
+    mut images: ResMut<'_, Assets<Image>>,
+    sky: Res<'_, Sky>,
+    parts: Query<'_, '_, Entity, With<world::BakedPart>>,
+) {
+    if !keys.just_pressed(KeyCode::KeyR) {
+        return;
+    }
+
+    sense.0 = sense.0.flipped();
+    println!("rotation sense: {} (rebuilding)", sense.0.label());
+
+    for entity in &parts {
+        commands.entity(entity).despawn();
+    }
+
+    *plan = WorldPlan::new(raw.0.clone(), &effects.0, sense.0);
+    *physics = Physics(vc_physics::StaticWorld::new(world::PHYSICS_BUCKET));
+
+    let baked = world::bake(
+        &plan,
+        &mut source.0,
+        &colliders.0,
+        &mut physics.0,
+        &mut textures,
+        &mut materials,
+        &mut meshes,
+        &mut standard,
+        &mut images,
+    );
+    world::spawn(&mut commands, baked, sky.fog_end);
+}
+
 /// Where the opening shot looks from and at.
 #[derive(Resource, Clone, Copy)]
 struct StartShot {
@@ -108,13 +169,26 @@ struct StartShot {
     target: Vec3,
 }
 
-/// The streamer, so cooking survives across the bake.
+/// The loaded map before filtering, kept so the plan can be rebuilt under the other
+/// rotation sense without re-reading the disk.
+#[derive(Resource)]
+struct RawWorld(vc_world::World);
+
+/// Command-line start cell and hour.
 #[derive(Resource)]
 struct Source(Streamer);
 
 /// Collision models, wrapped so the ECS can hold them.
 #[derive(Resource)]
 struct ColliderSet(Colliders);
+
+/// The `2dfx` effects, kept for the same reason.
+#[derive(Resource)]
+struct Effects(Vec<vc_world::Effect>);
+
+/// The active rotation sense.
+#[derive(Resource, Clone, Copy)]
+struct Sense(world::Sense);
 
 /// Command-line start cell and hour.
 struct Options {
