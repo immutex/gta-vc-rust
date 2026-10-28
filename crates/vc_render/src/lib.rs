@@ -64,10 +64,13 @@ impl Material for VcMaterial {
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
+        // Location 5 for colour is Bevy's own convention, which the default mesh
+        // vertex shader reads; any other number would silently miss it.
         let vertex_layout = layout.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
             Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
+            Mesh::ATTRIBUTE_COLOR.at_shader_location(5),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
 
@@ -147,6 +150,18 @@ pub fn upload_model(
         let positions: Vec<[f32; 3]> = mesh.vertices.iter().map(|vertex| vertex.position).collect();
         let normals: Vec<[f32; 3]> = mesh.vertices.iter().map(|vertex| vertex.normal).collect();
         let uvs: Vec<[f32; 2]> = mesh.vertices.iter().map(|vertex| vertex.uv[0]).collect();
+        let colours: Vec<[f32; 4]> = mesh
+            .vertices
+            .iter()
+            .map(|vertex| {
+                [
+                    srgb_to_linear(vertex.colour[0]),
+                    srgb_to_linear(vertex.colour[1]),
+                    srgb_to_linear(vertex.colour[2]),
+                    f32::from(vertex.colour[3]) / 255.0,
+                ]
+            })
+            .collect();
 
         for group in &mesh.groups {
             let mut built = Mesh::new(
@@ -156,6 +171,7 @@ pub fn upload_model(
             built.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions.clone());
             built.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals.clone());
             built.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs.clone());
+            built.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours.clone());
             built.insert_indices(Indices::U32(group.indices.clone()));
 
             let diffuse = group
@@ -174,6 +190,17 @@ pub fn upload_model(
     }
 
     parts
+}
+
+/// Prelit colours are stored sRGB-encoded; the renderer wants linear.
+fn srgb_to_linear(channel: u8) -> f32 {
+    let value = f32::from(channel) / 255.0;
+
+    if value <= 0.040_45 {
+        value / 12.92
+    } else {
+        ((value + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 fn upload_texture(texture: &CookedTexture) -> Image {
