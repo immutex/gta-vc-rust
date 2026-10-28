@@ -240,8 +240,6 @@ struct FlyCam {
     pitch: f32,
     /// False while the player is walking; the fly camera then leaves the view alone.
     walking: bool,
-    /// Whether instance rotations are applied conjugated. See [`RotationMode`].
-    flipped: bool,
 }
 
 impl FlyCam {
@@ -255,7 +253,6 @@ impl FlyCam {
             yaw: f32::atan2(-direction.x, -direction.z),
             pitch: f32::atan2(direction.y, horizontal),
             walking: false,
-            flipped: false,
         }
     }
 }
@@ -285,12 +282,13 @@ fn look(
     buttons: Res<'_, ButtonInput<MouseButton>>,
     mut motion: MessageReader<'_, '_, MouseMotion>,
     mut state: ResMut<'_, FlyCam>,
+    mut mode: ResMut<'_, RotationMode>,
 ) {
     if keys.just_pressed(KeyCode::KeyR) {
-        state.flipped = !state.flipped;
+        mode.flipped = !mode.flipped;
         println!(
-            "rotation sense: {}",
-            if state.flipped {
+            "rotation sense: {} (rebuilding)",
+            if mode.flipped {
                 "conjugate"
             } else {
                 "as stored"
@@ -422,6 +420,7 @@ fn rebuild(
     }
 
     *seen = mode.flipped;
+    println!("rebuilding world: {} cells released", stream.loaded.len());
 
     if !stream.loaded.is_empty() || !stream.cursors.is_empty() {
         for (entity, child) in &children {
