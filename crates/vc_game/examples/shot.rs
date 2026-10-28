@@ -186,7 +186,6 @@ fn setup_camera(
     commands.spawn((
         scene::world_camera(shot.eye, shot.target, &sky, Camera::default()),
         RenderTarget::Image(handle.into()),
-        Msaa::Off,
     ));
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::new(20.0, 20.0, 20.0))),
