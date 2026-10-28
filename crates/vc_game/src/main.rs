@@ -114,6 +114,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Camera3d::default(),
                 // Vice City had no HDR pipeline: the texture colour is the colour.
                 Tonemapping::None,
+                Projection::from(PerspectiveProjection {
+                    near: 0.1,
+                    // The fog ends as far as 2000 units out; clipping sooner would
+                    // cut geometry before it dissolved into the sky.
+                    far: 3000.0,
+                    ..default()
+                }),
                 DistanceFog {
                     color: sky.clear,
                     falloff: FogFalloff::Linear {

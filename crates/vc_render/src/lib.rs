@@ -58,9 +58,12 @@ impl Material for VcMaterial {
         SHADER_PATH.into()
     }
 
+    // Opaque for now. Masking looked right in principle - Vice City's foliage and
+    // railings are cut-outs - but forcing it on every material punches holes wherever
+    // a texture's alpha decodes badly, and block-compressed alpha is the least certain
+    // part of the pipeline. Per-texture masking comes back once alpha is trustworthy.
     fn alpha_mode(&self) -> AlphaMode {
-        // Foliage, fences and railings are cut-outs in Vice City, not blended surfaces.
-        AlphaMode::Mask(0.5)
+        AlphaMode::Opaque
     }
 
     fn specialize(
@@ -230,7 +233,14 @@ fn upload_texture(texture: &CookedTexture) -> Image {
         vc_cook::TextureFormat::Rgba8 => TextureFormat::Rgba8UnormSrgb,
     };
 
-    let level = &texture.levels[0];
+    // Every level is uploaded, not just the largest. Sampling a city's worth of
+    // block-compressed texture with a single level shimmers badly at distance, which
+    // reads as glitching rather than as aliasing.
+    let mut data = Vec::new();
+    for level in &texture.levels {
+        data.extend_from_slice(&level.data);
+    }
+
     let mut image = Image::new(
         Extent3d {
             width: u32::from(texture.width),
@@ -238,10 +248,11 @@ fn upload_texture(texture: &CookedTexture) -> Image {
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        level.data.clone(),
+        data,
         format,
         RenderAssetUsages::default(),
     );
+    image.texture_descriptor.mip_level_count = texture.levels.len().max(1) as u32;
 
     image.sampler = ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor::linear());
 
