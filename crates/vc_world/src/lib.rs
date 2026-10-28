@@ -246,6 +246,69 @@ impl World {
     }
 }
 
+/// One `2dfx` entry: an effect anchored at a point in its model's space.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Effect {
+    /// Definition the effect belongs to.
+    pub definition_id: u32,
+    /// Position in the model's own space.
+    pub offset: [f32; 3],
+}
+
+/// Parses the `2dfx` sections of an IDE file.
+///
+/// The first three values after the id are the offset, which is what makes these
+/// entries useful for checking placements: a street lamp's light is authored where the
+/// lamp head is, independently of any instance transform.
+///
+/// # Errors
+/// Returns [`WorldError::Number`] for a field that is not a number.
+pub fn parse_effects(text: &str) -> Result<Vec<Effect>, WorldError> {
+    let mut effects = Vec::new();
+    let mut in_section = false;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if trimmed.eq_ignore_ascii_case("end") {
+            in_section = false;
+
+            continue;
+        }
+
+        if !trimmed.contains(',') {
+            in_section = trimmed.eq_ignore_ascii_case("2dfx");
+
+            continue;
+        }
+
+        if !in_section {
+            continue;
+        }
+
+        let fields: Vec<&str> = trimmed.split(',').map(str::trim).collect();
+
+        if fields.len() < 4 {
+            continue;
+        }
+
+        effects.push(Effect {
+            definition_id: number::<u32>(fields[0], 0)?,
+            offset: [
+                number::<f32>(fields[1], 1)?,
+                number::<f32>(fields[2], 2)?,
+                number::<f32>(fields[3], 3)?,
+            ],
+        });
+    }
+
+    Ok(effects)
+}
+
 /// Side of one streaming cell, in world units. Vice City's draw distances run
 /// 150 to 300 units, so a cell that size is a natural streaming granularity.
 pub const CELL_SIZE: f32 = 200.0;
@@ -434,6 +497,17 @@ mod tests {
         let instances = parse_instances(text).unwrap();
 
         assert_eq!(instances.len(), 1);
+    }
+
+    #[test]
+    fn reads_an_effect_offset() {
+        let text = "2dfx\n936, 139.699, -15.9421, 0.820541, 255, 255, 255, 200\nend\n";
+
+        let effects = parse_effects(text).unwrap();
+
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].definition_id, 936);
+        assert_eq!(effects[0].offset, [139.699, -15.9421, 0.820_541]);
     }
 
     #[test]

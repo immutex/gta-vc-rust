@@ -18,13 +18,12 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use vc_paths::Paths;
 
-use vc_transport::{GameRoot, ImageArchive};
+use vc_transport::GameRoot;
 use vc_world::{ObjectDefinition, World};
 
 pub(crate) fn run() -> Result<()> {
     let root = GameRoot::from_env()?;
-    let archive = ImageArchive::open(&root.image())?;
-    let world = load_world(&root.path().join("data/maps"))?;
+    let (world, world_effects) = load_world(&root.path().join("data/maps"))?;
     let paths = load_paths(&root.path().join("data/maps/paths.ipl"))?;
 
     let nodes: Vec<[f32; 3]> = paths
@@ -43,133 +42,87 @@ pub(crate) fn run() -> Result<()> {
         let _ = definitions.insert(definition.id, definition);
     }
 
-    let mut stored = (0.0f64, 0u32);
-    let mut conjugated = (0.0f64, 0u32);
-    let mut models_seen = 0u32;
+    // Lamp heads hang over the road, and the 2dfx entry says where the head is in the
+    // model's own space. So: place the head under both rotation conventions and see
+    // which one lands closer to the road graph. Authored data on both sides.
+    let mut effects: HashMap<u32, Vec<[f32; 3]>> = HashMap::new();
+    for effect in &world_effects {
+        effects
+            .entry(effect.definition_id)
+            .or_default()
+            .push(effect.offset);
+    }
+
+    let mut stored = (0.0f64, 0u32, 0u32);
+    let mut conjugated = (0.0f64, 0u32, 0u32);
 
     for instance in &world.instances {
-        let Some(definition) = definitions.get(&instance.definition_id) else {
+        let Some(offsets) = effects.get(&instance.definition_id) else {
             continue;
         };
-        if !definition.model.to_ascii_lowercase().contains("lamp") {
-            continue;
-        }
-
-        let Some(arm) = arm_direction(&archive, &definition.model)? else {
-            continue;
-        };
-        models_seen += 1;
-
         let Some((node, distance)) = nearest_node(&nodes, instance.position) else {
             continue;
         };
-        if distance > 30.0 {
+        if distance > 40.0 {
             continue;
         }
 
-        let to_road = normalize([
-            node[0] - instance.position[0],
-            node[1] - instance.position[1],
-            0.0,
-        ]);
-        let as_stored = normalize(horizontal(rotate(arm, instance.rotation)));
-        let flipped = normalize(horizontal(rotate(
-            arm,
-            [
-                -instance.rotation[0],
-                -instance.rotation[1],
-                -instance.rotation[2],
-                instance.rotation[3],
-            ],
-        )));
+        // Only anchors whose arm is off-axis can tell the conventions apart, and only
+        // rotated instances apply the rotation at all.
+        let rotated = instance.rotation[3].abs() < 0.999;
+        for offset in offsets {
+            if !rotated || offset[0].hypot(offset[1]) < 0.5 {
+                continue;
+            }
 
-        stored.0 += f64::from(dot(as_stored, to_road));
-        stored.1 += 1;
-        conjugated.0 += f64::from(dot(flipped, to_road));
-        conjugated.1 += 1;
+            let as_stored = place(*offset, instance.rotation, instance.position);
+            let flipped = place(
+                *offset,
+                [
+                    -instance.rotation[0],
+                    -instance.rotation[1],
+                    -instance.rotation[2],
+                    instance.rotation[3],
+                ],
+                instance.position,
+            );
+
+            let to_stored = horizontal_distance(as_stored, node);
+            let to_flipped = horizontal_distance(flipped, node);
+
+            stored.0 += f64::from(to_stored);
+            stored.1 += 1;
+            if to_stored < to_flipped {
+                stored.2 += 1;
+            }
+
+            conjugated.0 += f64::from(to_flipped);
+            conjugated.1 += 1;
+        }
     }
 
-    println!(
-        "lamp instances measured: {} ({} model kinds)",
-        stored.1, models_seen
-    );
+    println!("effect anchors measured: {} across the map", stored.1);
 
     if stored.1 > 0 {
         println!(
-            "  stored quaternion: mean dot with road direction {:.3}",
+            "  stored quaternion: mean {:.2} units from the road",
             stored.0 / f64::from(stored.1)
         );
         println!(
-            "  conjugated:        mean dot with road direction {:.3}",
+            "  conjugated:        mean {:.2} units from the road",
             conjugated.0 / f64::from(conjugated.1)
         );
-        println!("  (1.0 means the arm always points at the road, 0.0 is chance)");
+        println!(
+            "  stored wins {:.1}% of anchors",
+            100.0 * f64::from(stored.2) / f64::from(stored.1)
+        );
+        println!(
+            "  mean advantage of stored: {:.2} units (positive means stored is closer)",
+            (conjugated.0 - stored.0) / f64::from(stored.1)
+        );
     }
 
     Ok(())
-}
-
-/// Horizontal direction the model's top leans relative to its base, in model space.
-fn arm_direction(archive: &ImageArchive, model: &str) -> Result<Option<[f32; 3]>> {
-    let name = format!("{model}.dff");
-    let Some(&index) = archive.indices_of(&name).first() else {
-        return Ok(None);
-    };
-    let bytes = archive.data(index)?;
-    let Ok(clump) = vc_dff::decode_clump_geometry(bytes) else {
-        return Ok(None);
-    };
-
-    let mut lowest = f32::INFINITY;
-    let mut highest = f32::NEG_INFINITY;
-    for geometry in &clump.geometries {
-        for vertex in &geometry.decoded.vertices {
-            lowest = lowest.min(vertex.position[2]);
-            highest = highest.max(vertex.position[2]);
-        }
-    }
-
-    if !lowest.is_finite() || highest - lowest < 0.5 {
-        return Ok(None);
-    }
-
-    let span = highest - lowest;
-    let mut base = [0.0f32; 3];
-    let mut base_count = 0u32;
-    let mut top = [0.0f32; 3];
-    let mut top_count = 0u32;
-
-    for geometry in &clump.geometries {
-        for vertex in &geometry.decoded.vertices {
-            let z = vertex.position[2];
-
-            if z < lowest + span * 0.15 {
-                for (axis, value) in vertex.position.iter().enumerate() {
-                    base[axis] += value;
-                }
-                base_count += 1;
-            } else if z > highest - span * 0.15 {
-                for (axis, value) in vertex.position.iter().enumerate() {
-                    top[axis] += value;
-                }
-                top_count += 1;
-            }
-        }
-    }
-
-    if base_count == 0 || top_count == 0 {
-        return Ok(None);
-    }
-
-    let base = base.map(|value| value / base_count as f32);
-    let top = top.map(|value| value / top_count as f32);
-    let arm = normalize(horizontal([top[0] - base[0], top[1] - base[1], 0.0]));
-
-    if arm.iter().all(|value| value.abs() < 1e-6) {
-        return Ok(None);
-    }
-
-    Ok(Some(arm))
 }
 
 fn nearest_node(nodes: &[[f32; 3]], position: [f32; 3]) -> Option<([f32; 3], f32)> {
@@ -209,24 +162,6 @@ const fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     ]
 }
 
-const fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-const fn horizontal(v: [f32; 3]) -> [f32; 3] {
-    [v[0], v[1], 0.0]
-}
-
-fn normalize(v: [f32; 3]) -> [f32; 3] {
-    let length = dot(v, v).sqrt();
-
-    if length < 1e-6 {
-        return [0.0; 3];
-    }
-
-    [v[0] / length, v[1] / length, v[2] / length]
-}
-
 fn load_paths(path: &Path) -> Result<Paths> {
     let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     let text = String::from_utf8_lossy(&bytes);
@@ -234,8 +169,23 @@ fn load_paths(path: &Path) -> Result<Paths> {
     Ok(Paths::parse(&text)?)
 }
 
-fn load_world(directory: &Path) -> Result<World> {
+fn place(offset: [f32; 3], rotation: [f32; 4], position: [f32; 3]) -> [f32; 3] {
+    let rotated = rotate(offset, rotation);
+
+    [
+        rotated[0] + position[0],
+        rotated[1] + position[1],
+        rotated[2] + position[2],
+    ]
+}
+
+fn horizontal_distance(a: [f32; 3], b: [f32; 3]) -> f32 {
+    (a[0] - b[0]).hypot(a[1] - b[1])
+}
+
+fn load_world(directory: &Path) -> Result<(World, Vec<vc_world::Effect>)> {
     let mut world = World::default();
+    let mut effects = Vec::new();
     let mut paths = Vec::new();
     collect(directory, &mut paths)?;
 
@@ -244,16 +194,19 @@ fn load_world(directory: &Path) -> Result<World> {
         let text = String::from_utf8_lossy(&bytes);
 
         match path.extension().and_then(|found| found.to_str()) {
-            Some("ide") => world
-                .definitions
-                .extend(vc_world::parse_definitions(&text)?),
+            Some("ide") => {
+                world
+                    .definitions
+                    .extend(vc_world::parse_definitions(&text)?);
+                effects.extend(vc_world::parse_effects(&text)?);
+            }
             Some("ipl") => world.instances.extend(vc_world::parse_instances(&text)?),
             _ => {}
         }
     }
 
     world.instances.retain(|instance| instance.interior <= 0);
-    Ok(world)
+    Ok((world, effects))
 }
 
 fn collect(directory: &Path, out: &mut Vec<std::path::PathBuf>) -> Result<()> {

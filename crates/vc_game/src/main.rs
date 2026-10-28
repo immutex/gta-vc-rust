@@ -103,6 +103,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             1.0,
         ),
         sun: Vec4::splat(sun),
+        floor: 0.35,
     };
 
     let collision = CollisionSet(Colliders::load(&archive));
@@ -169,9 +170,18 @@ struct CollisionSet(Colliders);
 /// A quaternion and its conjugate describe the same rotation in opposite hands. The
 /// data cannot say which the game meant, so this is a switch: press R and the world
 /// respawns under the other convention, which settles it in one look.
-#[derive(Resource, Default)]
+#[derive(Resource)]
 struct RotationMode {
     flipped: bool,
+}
+
+impl Default for RotationMode {
+    /// Conjugated by default: `cargo xtask facing` places 2,421 authored effect anchors
+    /// under both readings and the conjugated one lands nearer the road graph 66% of
+    /// the time. The game's quaternions are the transposed sense of ours.
+    fn default() -> Self {
+        Self { flipped: true }
+    }
 }
 
 /// Marks the diagnostics text so only it is rewritten each frame.
@@ -230,7 +240,7 @@ impl FlyCam {
             yaw: f32::atan2(-direction.x, -direction.z),
             pitch: f32::atan2(direction.y, horizontal),
             walking: false,
-            flipped: false,
+            flipped: true,
         }
     }
 }
@@ -948,6 +958,7 @@ fn spawn_water(
         uniforms: vc_render::VcUniforms {
             tint: Vec4::new(water[0] / 255.0, water[1] / 255.0, water[2] / 255.0, 1.0),
             cutout: 0.0,
+            floor: 0.0,
             ambient: Vec4::ZERO,
             sun: Vec4::ONE,
         },

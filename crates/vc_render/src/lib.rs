@@ -39,6 +39,8 @@ pub struct VcUniforms {
     pub tint: Vec4,
     /// Above zero, texels with alpha below half are discarded.
     pub cutout: f32,
+    /// Lowest shade a baked surface may have.
+    pub floor: f32,
     /// Light that reaches surfaces regardless of their baked shade.
     pub ambient: Vec4,
     /// Multiplier for the baked shade, which already contains the original's sun.
@@ -52,6 +54,12 @@ pub struct Lighting {
     pub ambient: Vec4,
     /// Gain applied to the prelit shade.
     pub sun: Vec4,
+    /// Lowest shade a baked surface may have.
+    ///
+    /// Vice City's roads are baked black because the original lit them with dynamic
+    /// lights at runtime; without that, black stays black. A floor stands in for the
+    /// light the original would have added.
+    pub floor: f32,
 }
 
 impl Default for Lighting {
@@ -59,6 +67,7 @@ impl Default for Lighting {
         Self {
             ambient: Vec4::ONE,
             sun: Vec4::ONE,
+            floor: 0.35,
         }
     }
 }
@@ -85,6 +94,7 @@ impl Default for VcMaterial {
             uniforms: VcUniforms {
                 tint: Vec4::ONE,
                 cutout: 0.0,
+                floor: 0.0,
                 ambient: Vec4::ZERO,
                 sun: Vec4::ONE,
             },
@@ -157,6 +167,8 @@ pub struct TextureCache {
     /// Keyed by allocation address, holding the `Arc` so no address can be recycled
     /// while it is a key.
     uploaded: HashMap<usize, (Arc<CookedTexture>, Handle<Image>)>,
+    /// One-pixel grey, for geometry whose material names no texture.
+    fallback: Option<Handle<Image>>,
 }
 
 impl TextureCache {
@@ -176,6 +188,35 @@ impl TextureCache {
         let _ = self
             .uploaded
             .insert(key, (Arc::clone(texture), handle.clone()));
+
+        handle
+    }
+
+    /// A flat grey image for materials that name no texture.
+    ///
+    /// The original draws those with the material colour; without it, grey is far closer
+    /// than the white that Bevy's own fallback produces, and closer than dropping the
+    /// surface, which left holes in the beach.
+    pub fn flat_grey(&mut self, images: &mut Assets<Image>) -> Handle<Image> {
+        if let Some(handle) = &self.fallback {
+            return handle.clone();
+        }
+
+        let mut image = Image::new(
+            Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            vec![128, 128, 128, 255],
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::RENDER_WORLD,
+        );
+        image.sampler = ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor::linear());
+
+        let handle = images.add(image);
+        self.fallback = Some(handle.clone());
 
         handle
     }
@@ -271,6 +312,7 @@ pub fn upload_model(
                     uniforms: VcUniforms {
                         tint: Vec4::ONE,
                         cutout: if cutout { 1.0 } else { 0.0 },
+                        floor: lighting.floor,
                         ambient: lighting.ambient,
                         sun: lighting.sun,
                     },

@@ -6,6 +6,7 @@ import bevy_pbr::render::forward_io::VertexOutput;
 struct VcUniforms {
     tint: vec4<f32>,
     cutout: f32,
+    floor: f32,
     ambient: vec4<f32>,
     sun: vec4<f32>,
 };
@@ -25,7 +26,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // The baked shade already carries the original's sun, so it is gained rather than
     // replaced; the ambient term is what lifts the shadows the 2002 renderer left
     // black. Together they stand in for the global illumination the game never had.
-    let shade = uniforms.ambient.rgb + in.color.rgb * uniforms.sun.rgb;
+    let baked = max(in.color.rgb, vec3<f32>(uniforms.floor));
+    let shade = uniforms.ambient.rgb + baked * uniforms.sun.rgb;
     let colour = vec4<f32>(
         sampled.rgb * shade * uniforms.tint.rgb,
         sampled.a * uniforms.tint.a,
