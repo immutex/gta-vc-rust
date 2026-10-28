@@ -56,9 +56,9 @@ pub struct Lighting {
     pub sun: Vec4,
     /// Lowest shade a baked surface may have.
     ///
-    /// Vice City's roads are baked black because the original lit them with dynamic
-    /// lights at runtime; without that, black stays black. A floor stands in for the
-    /// light the original would have added.
+    /// Vice City's roads and under-passes are baked black because the original lit them
+    /// with dynamic lights at runtime - 24% of the world's prelit vertices are near
+    /// black. Without those lights, a floor stands in for what they would have added.
     pub floor: f32,
 }
 
@@ -67,7 +67,7 @@ impl Default for Lighting {
         Self {
             ambient: Vec4::ONE,
             sun: Vec4::ONE,
-            floor: 0.35,
+            floor: 0.45,
         }
     }
 }

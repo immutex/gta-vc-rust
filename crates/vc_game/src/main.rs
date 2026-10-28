@@ -103,7 +103,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             1.0,
         ),
         sun: Vec4::splat(sun),
-        floor: 0.35,
+        floor: 0.45,
     };
 
     let collision = CollisionSet(Colliders::load(&archive));
@@ -176,11 +176,11 @@ struct RotationMode {
 }
 
 impl Default for RotationMode {
-    /// Conjugated by default: `cargo xtask facing` places 2,421 authored effect anchors
-    /// under both readings and the conjugated one lands nearer the road graph 66% of
-    /// the time. The game's quaternions are the transposed sense of ours.
+    /// As stored: four data-driven tests (`cargo xtask facing`) failed to separate the
+    /// two readings - road distance 51/49, heads-over-road 66/63, shadow concentration
+    /// 0.21/0.19 - so the standard reading stands and `R` exists for a visual check.
     fn default() -> Self {
-        Self { flipped: true }
+        Self { flipped: false }
     }
 }
 
@@ -240,7 +240,7 @@ impl FlyCam {
             yaw: f32::atan2(-direction.x, -direction.z),
             pitch: f32::atan2(direction.y, horizontal),
             walking: false,
-            flipped: true,
+            flipped: false,
         }
     }
 }
@@ -794,6 +794,7 @@ fn setup_scene(
     mut materials: ResMut<'_, Assets<VcMaterial>>,
     mut images: ResMut<'_, Assets<Image>>,
     mut textures: ResMut<'_, TextureCache>,
+    lighting: Res<'_, WorldLighting>,
 ) {
     // Every model's vertices are in the game's Z-up axes, so the whole world hangs off
     // one rotated root instead of converting each vertex or each instance. The camera
@@ -819,6 +820,18 @@ fn setup_scene(
         &mut textures,
         root,
         &sky,
+    );
+
+    spawn_calibration(
+        &mut commands,
+        &mut stream.streamer,
+        &mut meshes,
+        &mut materials,
+        &mut images,
+        &mut textures,
+        root,
+        spawn.0,
+        &lighting.0,
     );
 
     commands.spawn((
@@ -907,6 +920,68 @@ fn update_hud(
 /// `data/water.dat` holds a single rectangle - x and y spanning ±3000 at z = 6.0 - and
 /// the texture comes from `particle.txd`. The tint is `timecyc.dat`'s water column, so
 /// the sea changes with weather and hour like everything else.
+/// Two copies of a lamp with a known arm, one under each rotation sense.
+///
+/// The data cannot say which sense the game used, and no amount of statistics settled
+/// it. This puts the question in front of you instead: the left copy applies the
+/// quaternion as stored, the right copy conjugates it, and one look says which is
+/// right. Delete this once the answer is baked in.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is a distinct Bevy resource or asset collection"
+)]
+fn spawn_calibration(
+    commands: &mut Commands<'_, '_>,
+    stream: &mut Streamer,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<VcMaterial>,
+    images: &mut Assets<Image>,
+    textures: &mut TextureCache,
+    root: Entity,
+    centre: [f32; 3],
+    lighting: &Lighting,
+) {
+    let definition = ObjectDefinition {
+        id: u32::MAX,
+        model: "lamppost3".to_owned(),
+        txd: "generic".to_owned(),
+        draw_distance: 300.0,
+        flags: 0,
+    };
+
+    let Ok(model) = stream.model(&definition) else {
+        println!("calibration: lamppost3 not available");
+
+        return;
+    };
+    let parts = upload_model(&model, *lighting, meshes, materials, images, textures);
+
+    for (side, conjugate) in [(-6.0f32, false), (6.0, true)] {
+        let rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+
+        let placed =
+            Transform::from_translation(Vec3::new(centre[0] + side, centre[1] - 20.0, centre[2]))
+                .with_rotation(if conjugate {
+                    rotation.conjugate()
+                } else {
+                    rotation
+                });
+
+        for part in &parts {
+            let entity = commands
+                .spawn((
+                    Mesh3d(part.mesh.clone()),
+                    MeshMaterial3d(part.material.clone()),
+                    placed,
+                ))
+                .id();
+            commands.entity(entity).insert(ChildOf(root));
+        }
+    }
+
+    println!("calibration: left = rotation as stored, right = conjugated");
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "each argument is a distinct Bevy resource or asset collection"

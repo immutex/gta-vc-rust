@@ -253,6 +253,8 @@ pub struct Effect {
     pub definition_id: u32,
     /// Position in the model's own space.
     pub offset: [f32; 3],
+    /// Direction vector some effect types carry, in the model's own space.
+    pub direction: Option<[f32; 3]>,
 }
 
 /// Parses the `2dfx` sections of an IDE file.
@@ -296,6 +298,23 @@ pub fn parse_effects(text: &str) -> Result<Vec<Effect>, WorldError> {
             continue;
         }
 
+        // Some effect types carry a direction here and some carry texture names, so a
+        // value that does not parse simply means this row has none.
+        let direction = if fields.len() >= 13 {
+            let parsed = [
+                fields[10].parse::<f32>(),
+                fields[11].parse::<f32>(),
+                fields[12].parse::<f32>(),
+            ];
+
+            match parsed {
+                [Ok(x), Ok(y), Ok(z)] => Some([x, y, z]),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
         effects.push(Effect {
             definition_id: number::<u32>(fields[0], 0)?,
             offset: [
@@ -303,6 +322,7 @@ pub fn parse_effects(text: &str) -> Result<Vec<Effect>, WorldError> {
                 number::<f32>(fields[2], 2)?,
                 number::<f32>(fields[3], 3)?,
             ],
+            direction,
         });
     }
 
@@ -508,6 +528,7 @@ mod tests {
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].definition_id, 936);
         assert_eq!(effects[0].offset, [139.699, -15.9421, 0.820_541]);
+        assert!(effects[0].direction.is_none());
     }
 
     #[test]
