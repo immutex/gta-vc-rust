@@ -244,6 +244,11 @@ fn fly_camera(
     }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    reason = "Bevy system parameters are taken by value by design, and each one is a distinct resource or asset collection"
+)]
 fn stream_cells(
     mut commands: Commands<'_, '_>,
     mut stream: ResMut<'_, Stream>,
