@@ -142,7 +142,7 @@ impl TextureCache {
     /// it runs across every core while the asset inserts stay on this thread.
     pub fn upload_batch(&mut self, textures: &[Arc<CookedTexture>], images: &mut Assets<Image>) {
         if self.flat.is_none() {
-            self.flat = Some(images.add(flat_image()));
+            self.flat = Some(images.add(white_image()));
         }
 
         let mut seen = std::collections::HashSet::new();
@@ -166,13 +166,13 @@ impl TextureCache {
         self.uploaded.get(&key_of(texture)).cloned()
     }
 
-    /// One mid-grey texel, for groups that name no texture.
+    /// One white texel, for groups that name no texture.
     ///
-    /// White is the wrong fallback: a missing texture then reads as a hole punched in
-    /// the world, which is what the pale patches on the beach were. Grey keeps the
-    /// surface solid and lets the prelit shade do the work.
+    /// These surfaces are coloured twice over already: the material colour is folded into
+    /// the vertex colour by the batcher and the prelit shade multiplies it. A grey base on
+    /// top of that darkens them twice, which is why the sand read as flat grey.
     #[must_use]
-    pub fn flat(&self) -> Handle<Image> {
+    pub fn white(&self) -> Handle<Image> {
         self.flat.clone().unwrap_or_default()
     }
 
@@ -258,7 +258,7 @@ fn image_for(texture: &CookedTexture) -> Image {
     image
 }
 
-fn flat_image() -> Image {
+fn white_image() -> Image {
     let mut image = Image::new(
         Extent3d {
             width: 1,
@@ -266,7 +266,7 @@ fn flat_image() -> Image {
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        vec![158, 158, 158, 255],
+        vec![255, 255, 255, 255],
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::RENDER_WORLD,
     );
@@ -302,11 +302,11 @@ impl MaterialCache {
         // Diagnostic: drop every texture so a black area can be told apart from a black
         // image - unlit geometry stays black, a dark texture turns white.
         let image = if std::env::var_os("VC_NO_TEXTURES").is_some() {
-            textures.flat()
+            textures.white()
         } else {
             texture
                 .and_then(|texture| textures.handle(texture))
-                .unwrap_or_else(|| textures.flat())
+                .unwrap_or_else(|| textures.white())
         };
 
         let material = StandardMaterial {
