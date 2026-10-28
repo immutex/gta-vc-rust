@@ -202,8 +202,6 @@ impl Streamer {
             return Some(Arc::clone(found));
         }
 
-        self.missing.insert(key.clone());
-
         let mut candidates: Vec<String> = vec![hint.to_owned(), SHARED_TXD.to_owned()];
         for entry in self.archive.entries() {
             if entry.has_extension("txd") {

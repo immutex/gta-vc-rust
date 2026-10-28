@@ -348,8 +348,11 @@ then streams cells around a free-flying camera, cooking models as they come into
 | `vc_render` | One `Mesh` per material group, one material per texture, one GPU upload per dictionary texture |
 | `vc_game` | Streams 5×5 cells, spawns entities with the instance's quaternion and scale, flies the camera |
 
-Measured on a radius-2 region around the busiest cell: **806 models, 443,732 triangles, 6,079 draw
-groups, 5,970 textured (98.2%)**, zero failures. The remaining 1.8% name no texture at all.
+Interiors are filtered out for now — they are a separate streaming problem, and the densest cell on the
+map is a hotel interior, which makes a poor first view. That leaves **8,446 exterior placements in 226
+cells**, and a radius-2 cook around the busiest of them is **878 models, 6,932 draw groups, 6,808
+textured (98.2%)**, zero failures. The remaining 1.8% either name no texture (LODs and flat-colour
+surfaces) or name a texture that no shipped dictionary holds.
 
 Two bugs this step turned up, both found by measuring rather than by looking at a screen:
 

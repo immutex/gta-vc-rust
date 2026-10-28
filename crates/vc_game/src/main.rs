@@ -43,6 +43,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         world.instances.len()
     );
 
+    // Interiors are a separate streaming problem; the outside world comes first.
+    let world = World {
+        definitions: world.definitions,
+        instances: world
+            .instances
+            .into_iter()
+            .filter(|instance| instance.interior == 0)
+            .collect(),
+    };
+
     let grid = CellGrid::build(&world, CELL_SIZE);
     let start = grid.busiest().ok_or("the map holds no placements")?;
     let centre = start.centre(CELL_SIZE);

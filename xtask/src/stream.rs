@@ -13,6 +13,15 @@ pub(crate) fn run(radius: i32) -> Result<()> {
     let archive = ImageArchive::open(&root.image())?;
     let world = load_world(&root.path().join("data/maps"))?;
 
+    let world = World {
+        definitions: world.definitions,
+        instances: world
+            .instances
+            .into_iter()
+            .filter(|instance| instance.interior == 0)
+            .collect(),
+    };
+
     let grid = CellGrid::build(&world, CELL_SIZE);
     let start = grid.busiest().context("the map holds no placements")?;
 
@@ -42,8 +51,6 @@ pub(crate) fn run(radius: i32) -> Result<()> {
     let mut untextured = 0u64;
     let mut failures = 0u64;
 
-    let mut debug_shown = 0;
-
     for key in grid.within(start, radius) {
         for index in grid.instances(key) {
             let Some(instance) = world.instances.get(*index as usize) else {
@@ -59,27 +66,6 @@ pub(crate) fn run(radius: i32) -> Result<()> {
 
             match streamer.model(definition) {
                 Ok(model) => {
-                    if debug_shown < 3 {
-                        debug_shown += 1;
-                        println!(
-                            "  {} txd={} meshes={} groups={} textures={:?}",
-                            definition.model,
-                            definition.txd,
-                            model.meshes.len(),
-                            model
-                                .meshes
-                                .iter()
-                                .map(|mesh| mesh.groups.len())
-                                .sum::<usize>(),
-                            model
-                                .meshes
-                                .iter()
-                                .flat_map(|mesh| mesh.groups.iter())
-                                .map(|group| group.texture.is_some())
-                                .collect::<Vec<_>>()
-                        );
-                    }
-
                     triangles += model.triangle_count() as u64;
                     for mesh in &model.meshes {
                         for group in &mesh.groups {
