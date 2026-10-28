@@ -69,7 +69,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (world, definitions) = prepare(world);
 
     let grid = CellGrid::build(&world, CELL_SIZE);
-    let start = grid.busiest().ok_or("the map holds no placements")?;
+    // Optional cell argument so any part of the map can be inspected directly:
+    // `cargo run -p vc_game -- 1 1` starts at Little Havana instead of the beach.
+    let start = match cell_argument() {
+        Some(key) => key,
+        None => grid.busiest().ok_or("the map holds no placements")?,
+    };
     let centre = start.centre(CELL_SIZE);
 
     println!(
@@ -159,6 +164,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         .run();
 
     Ok(())
+}
+
+/// Cell coordinates from the command line, if two were given.
+fn cell_argument() -> Option<CellKey> {
+    let mut arguments = std::env::args().skip(1);
+
+    let x = arguments.next()?.parse::<i32>().ok()?;
+    let y = arguments.next()?.parse::<i32>().ok()?;
+
+    Some(CellKey { x, y })
 }
 
 /// Collision models, wrapped so the streaming crate stays free of Bevy types.
@@ -888,6 +903,7 @@ fn spawn_hud(mut commands: Commands<'_, '_>) {
 fn update_hud(
     diagnostics: Res<'_, DiagnosticsStore>,
     stream: Res<'_, Stream>,
+    camera: Query<'_, '_, &Transform, With<FlyCamMarker>>,
     mut hud: Query<'_, '_, &mut Text, With<Hud>>,
 ) {
     let Ok(mut text) = hud.single_mut() else {
@@ -904,14 +920,28 @@ fn update_hud(
         .unwrap_or(0.0);
     let stats = stream.streamer.stats();
 
+    let at = camera
+        .single()
+        .map(|transform| {
+            // Back to game space so the numbers match the map files.
+            let p = transform.translation;
+            (p.x, -p.z, p.y)
+        })
+        .unwrap_or_default();
+
     text.0 = format!(
-        "{fps:5.1} fps  {frame_ms:5.2} ms\ncells {}/{}  entities {}\nmodels {}  textures {}  failed {}",
+        "{fps:5.1} fps  {frame_ms:5.2} ms\ncells {}/{}  entities {}\nmodels {}  textures {}  failed {}\nat {:.0} {:.0} {:.0}  cell {} {}",
         stream.loaded.len(),
         stream.grid.cell_count(),
         stream.spawned,
         stats.models,
         stats.textures,
         stream.failed,
+        at.0,
+        at.1,
+        at.2,
+        CellKey::of(at.into(), stream.grid.size()).x,
+        CellKey::of(at.into(), stream.grid.size()).y,
     );
 }
 
