@@ -178,32 +178,54 @@ pub fn upload_model(
             continue;
         }
 
-        let positions: Vec<[f32; 3]> = mesh.vertices.iter().map(|vertex| vertex.position).collect();
-        let normals: Vec<[f32; 3]> = mesh.vertices.iter().map(|vertex| vertex.normal).collect();
-        let uvs: Vec<[f32; 2]> = mesh.vertices.iter().map(|vertex| vertex.uv[0]).collect();
-        let colours: Vec<[f32; 4]> = mesh
-            .vertices
-            .iter()
-            .map(|vertex| {
-                [
-                    prelit_channel(vertex.colour[0]),
-                    prelit_channel(vertex.colour[1]),
-                    prelit_channel(vertex.colour[2]),
-                    f32::from(vertex.colour[3]) / 255.0,
-                ]
-            })
-            .collect();
-
         for group in &mesh.groups {
+            // Each material group gets its own mesh, so it is compiled down to only the
+            // vertices it indexes. Uploading a full copy of the vertex buffer per group
+            // multiplied memory by the number of materials a geometry uses.
+            let mut remap = vec![u32::MAX; mesh.vertices.len()];
+            let mut indices = Vec::with_capacity(group.indices.len());
+            let mut positions = Vec::with_capacity(group.indices.len());
+            let mut normals = Vec::with_capacity(group.indices.len());
+            let mut uvs = Vec::with_capacity(group.indices.len());
+            let mut colours = Vec::with_capacity(group.indices.len());
+
+            for index in &group.indices {
+                let Some(source) = mesh.vertices.get(*index as usize) else {
+                    continue;
+                };
+                let slot = remap[*index as usize];
+
+                if slot == u32::MAX {
+                    let next = positions.len() as u32;
+                    remap[*index as usize] = next;
+                    positions.push(source.position);
+                    normals.push(source.normal);
+                    uvs.push(source.uv[0]);
+                    colours.push([
+                        prelit_channel(source.colour[0]),
+                        prelit_channel(source.colour[1]),
+                        prelit_channel(source.colour[2]),
+                        f32::from(source.colour[3]) / 255.0,
+                    ]);
+                    indices.push(next);
+                } else {
+                    indices.push(slot);
+                }
+            }
+
+            if indices.is_empty() {
+                continue;
+            }
+
             let mut built = Mesh::new(
                 PrimitiveTopology::TriangleList,
-                RenderAssetUsages::default(),
+                RenderAssetUsages::RENDER_WORLD,
             );
-            built.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions.clone());
-            built.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals.clone());
-            built.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs.clone());
-            built.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours.clone());
-            built.insert_indices(Indices::U32(group.indices.clone()));
+            built.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+            built.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+            built.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+            built.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
+            built.insert_indices(Indices::U32(indices));
 
             let diffuse = group
                 .texture
@@ -264,11 +286,18 @@ fn upload_texture(texture: &CookedTexture) -> Image {
         TextureDimension::D2,
         data,
         format,
-        RenderAssetUsages::default(),
+        RenderAssetUsages::RENDER_WORLD,
     );
     image.texture_descriptor.mip_level_count = texture.levels.len().max(1) as u32;
 
-    image.sampler = ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor::linear());
+    // Vice City's texture coordinates tile well past 0..1, so the sampler must repeat
+    // rather than clamp, or every tiled surface smears its edge texel.
+    image.sampler = ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
+        address_mode_u: bevy::image::ImageAddressMode::Repeat,
+        address_mode_v: bevy::image::ImageAddressMode::Repeat,
+        address_mode_w: bevy::image::ImageAddressMode::Repeat,
+        ..bevy::image::ImageSamplerDescriptor::linear()
+    });
 
     image
 }

@@ -30,6 +30,10 @@ const VIEW_RADIUS: i32 = 2;
 /// Models cooked per frame, so streaming cannot stall the frame.
 const MODELS_PER_FRAME: usize = 8;
 
+/// Entities spawned per frame for the same reason: a cached model costs nothing to
+/// cook but can still be hundreds of meshes.
+const ENTITIES_PER_FRAME: usize = 512;
+
 /// Metres per second while flying.
 const FLY_SPEED: f32 = 60.0;
 
@@ -113,10 +117,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             spawned: 0,
             failed: 0,
         })
-        .insert_resource(FlyCam {
-            yaw: 0.0,
-            pitch: -0.25,
-        })
+        .insert_resource(FlyCam::looking_at(
+            to_bevy_position(centre) + Vec3::new(-120.0, 55.0, 0.0),
+            to_bevy_position(centre),
+        ))
         .insert_resource(sky)
         .insert_resource(Spawn(centre))
         .add_systems(Startup, setup_scene)
@@ -147,6 +151,20 @@ struct Stream {
 struct FlyCam {
     yaw: f32,
     pitch: f32,
+}
+
+impl FlyCam {
+    /// Orientation that looks from `eye` towards `target`, so the opening view is the
+    /// one the spawn was chosen for rather than a hard-coded angle.
+    fn looking_at(eye: Vec3, target: Vec3) -> Self {
+        let direction = (target - eye).normalize_or_zero();
+        let horizontal = direction.x.hypot(direction.z);
+
+        Self {
+            yaw: f32::atan2(-direction.x, -direction.z),
+            pitch: f32::atan2(direction.y, horizontal),
+        }
+    }
 }
 
 #[derive(Component)]
@@ -248,6 +266,7 @@ fn stream_cells(
     let centre = CellKey::of([at.x, -at.z, at.y], stream.grid.size());
     let wanted = stream.grid.within(centre, VIEW_RADIUS);
     let mut budget = MODELS_PER_FRAME;
+    let mut spawned_this_frame = 0;
 
     for key in wanted {
         if stream.loaded.contains(&key) {
@@ -271,7 +290,7 @@ fn stream_cells(
             let parts = if let Some(cached) = stream.uploaded.get(&definition.model) {
                 cached.clone()
             } else {
-                if budget == 0 {
+                if budget == 0 || spawned_this_frame >= ENTITIES_PER_FRAME {
                     complete = false;
                     let _ = stream.cursors.insert(key, position);
 
@@ -304,6 +323,13 @@ fn stream_cells(
                 continue;
             }
 
+            if spawned_this_frame + parts.len() > ENTITIES_PER_FRAME {
+                complete = false;
+                let _ = stream.cursors.insert(key, position);
+
+                break;
+            }
+
             // Straight from the map, in the game's own axes; the world root handles
             // the handed-up conversion for every mesh at once.
             let placed = Transform::from_translation(Vec3::from(instance.position))
@@ -323,6 +349,7 @@ fn stream_cells(
                     ChildOf(root.0),
                 ));
                 stream.spawned += 1;
+                spawned_this_frame += 1;
             }
         }
 

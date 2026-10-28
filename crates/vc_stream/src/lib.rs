@@ -90,6 +90,7 @@ pub struct Streamer {
     dictionaries: HashMap<String, Arc<HashMap<String, Arc<CookedTexture>>>>,
     global: HashMap<String, Arc<CookedTexture>>,
     missing: HashSet<String>,
+    broken: HashSet<String>,
     models: HashMap<String, Arc<CookedModel>>,
     stats: StreamStats,
 }
@@ -105,6 +106,7 @@ impl Streamer {
             dictionaries: HashMap::new(),
             global: HashMap::new(),
             missing: HashSet::new(),
+            broken: HashSet::new(),
             models: HashMap::new(),
             stats: StreamStats::default(),
         }
@@ -128,12 +130,25 @@ impl Streamer {
             return Ok(Arc::clone(cached));
         }
 
-        let bytes = self.fetch(&format!("{}.dff", definition.model))?;
-        let geometries =
-            vc_dff::decode_clump_with_materials(bytes).map_err(|error| StreamError::Format {
-                name: definition.model.clone(),
-                reason: error.to_string(),
-            })?;
+        let bytes = match self.fetch(&format!("{}.dff", definition.model)) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.stats.failures += 1;
+
+                return Err(error);
+            }
+        };
+        let geometries = match vc_dff::decode_clump_with_materials(bytes) {
+            Ok(geometries) => geometries,
+            Err(error) => {
+                self.stats.failures += 1;
+
+                return Err(StreamError::Format {
+                    name: definition.model.clone(),
+                    reason: error.to_string(),
+                });
+            }
+        };
 
         let resolved: Vec<Vec<Option<Arc<CookedTexture>>>> = geometries
             .iter()
@@ -251,8 +266,20 @@ impl Streamer {
             return Some(Arc::clone(cached));
         }
 
-        let bytes = self.fetch(&format!("{txd}.txd")).ok()?;
-        let parsed = Dictionary::parse(bytes).ok()?;
+        if self.broken.contains(txd) {
+            return None;
+        }
+
+        let Some(bytes) = self.fetch(&format!("{txd}.txd")).ok() else {
+            let _ = self.broken.insert(txd.to_owned());
+
+            return None;
+        };
+        let Ok(parsed) = Dictionary::parse(bytes) else {
+            let _ = self.broken.insert(txd.to_owned());
+
+            return None;
+        };
         let mut by_name = HashMap::with_capacity(parsed.textures.len());
 
         for texture in &parsed.textures {

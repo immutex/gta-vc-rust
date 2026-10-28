@@ -110,7 +110,7 @@ fn rotate(point: [f32; 3], q: [f32; 4]) -> [f32; 3] {
 }
 
 /// Cross product.
-pub fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
@@ -206,16 +206,6 @@ impl StaticWorld {
         }
     }
 
-    /// How many instances are placed.
-    pub const fn len(&self) -> usize {
-        self.instances.len()
-    }
-
-    /// Whether nothing is placed.
-    pub const fn is_empty(&self) -> bool {
-        self.instances.is_empty()
-    }
-
     /// Highest surface under `point`, searching down `depth` metres.
     ///
     /// The world is Z-up, so the ray falls along `-z` and the returned height is a
@@ -272,8 +262,10 @@ impl StaticWorld {
         best
     }
 
-    /// Distance a capsule of `radius` can move from `point` in `direction` before
-    /// touching something, up to `reach`.
+    /// Distance from `point` to the nearest surface along `direction`, up to `reach`.
+    ///
+    /// `direction` is used as given, so pass a unit vector if the result is to be read
+    /// as a distance in metres.
     pub fn cast(&self, point: [f32; 3], direction: [f32; 3], reach: f32) -> f32 {
         let mut nearest = reach;
 
@@ -396,7 +388,7 @@ fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
 }
 
 /// Dot product.
-pub const fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+const fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
