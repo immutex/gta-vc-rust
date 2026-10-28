@@ -63,10 +63,11 @@ Starts above the densest cell of the map and streams five cells in each directio
 
 | Input | Action |
 |---|---|
-| `W` `A` `S` `D` | fly forward, left, back, right |
-| `Space` / `Ctrl` | rise, descend |
+| `F` | switch between flying and walking |
+| `W` `A` `S` `D` | fly, or walk on foot |
+| `Space` / `Ctrl` | rise and descend while flying; jump while walking |
 | Hold left mouse | look around |
-| `Shift` | fly four times faster |
+| `Shift` | fly four times faster, or move twice as fast on foot |
 
 The window prints a line every two seconds with the cells loaded, entities spawned, models cooked and
 textures uploaded.

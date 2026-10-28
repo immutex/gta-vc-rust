@@ -4483,6 +4483,7 @@ dependencies = [
  "anyhow",
  "bevy",
  "vc_cook",
+ "vc_physics",
  "vc_render",
  "vc_stream",
  "vc_timecyc",

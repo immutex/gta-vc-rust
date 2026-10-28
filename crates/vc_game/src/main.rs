@@ -16,10 +16,11 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::input::mouse::MouseMotion;
 use bevy::pbr::{DistanceFog, FogFalloff, MeshMaterial3d};
 use bevy::prelude::*;
+use vc_physics::{Placement, StaticWorld};
 use vc_render::{
     ModelPart, TextureCache, VcMaterial, VcRenderPlugin, to_bevy_position, upload_model,
 };
-use vc_stream::Streamer;
+use vc_stream::{Colliders, Streamer};
 use vc_timecyc::Timecycle;
 use vc_transport::{GameRoot, ImageArchive};
 use vc_world::{CELL_SIZE, CellGrid, CellKey, ObjectDefinition, World};
@@ -33,6 +34,19 @@ const MODELS_PER_FRAME: usize = 8;
 /// Entities spawned per frame for the same reason: a cached model costs nothing to
 /// cook but can still be hundreds of meshes.
 const ENTITIES_PER_FRAME: usize = 512;
+
+/// Gravity in game units per second squared. Vice City's own is about 7, which is
+/// floaty; ten keeps the arc familiar without feeling like the moon.
+const GRAVITY: f32 = 10.0;
+
+/// Walking speed in game units per second.
+const WALK_SPEED: f32 = 6.0;
+
+/// Eye height above the player's feet.
+const EYE_HEIGHT: f32 = 1.7;
+
+/// Player radius against walls.
+const PLAYER_RADIUS: f32 = 0.45;
 
 /// Metres per second while flying.
 const FLY_SPEED: f32 = 60.0;
@@ -93,6 +107,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         sky.weather, sky.hour, sky.far_clip, sky.fog_start
     );
 
+    let collision = CollisionSet(Colliders::load(&archive));
+
     App::new()
         // The default asset root is `assets` next to the crate, which is where the
         // shader lives; overriding it doubles the path because Bevy already anchors
@@ -114,6 +130,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             loaded: HashSet::new(),
             cursors: HashMap::new(),
             uploaded: HashMap::new(),
+            physics: StaticWorld::new(25.0),
+            colliders: HashMap::new(),
             spawned: 0,
             failed: 0,
         })
@@ -122,13 +140,26 @@ fn main() -> Result<(), Box<dyn Error>> {
             to_bevy_position(centre),
         ))
         .insert_resource(sky)
+        .insert_resource(Player {
+            position: Vec3::new(centre[0], centre[1], 40.0),
+            velocity: Vec3::ZERO,
+            on_ground: false,
+        })
         .insert_resource(Spawn(centre))
+        .insert_resource(collision)
         .add_systems(Startup, setup_scene)
-        .add_systems(Update, (fly_camera, stream_cells, report).chain())
+        .add_systems(
+            Update,
+            (look, fly_camera, walk_player, stream_cells, report).chain(),
+        )
         .run();
 
     Ok(())
 }
+
+/// Collision models, wrapped so the streaming crate stays free of Bevy types.
+#[derive(Resource)]
+struct CollisionSet(Colliders);
 
 /// Where the camera starts, in game space.
 #[derive(Resource, Clone, Copy)]
@@ -143,14 +174,26 @@ struct Stream {
     loaded: HashSet<CellKey>,
     cursors: HashMap<CellKey, usize>,
     uploaded: HashMap<String, Vec<ModelPart>>,
+    physics: StaticWorld,
+    colliders: HashMap<String, usize>,
     spawned: u64,
     failed: u64,
+}
+
+/// The player, in game coordinates: Z is up, as the map is authored.
+#[derive(Resource)]
+struct Player {
+    position: Vec3,
+    velocity: Vec3,
+    on_ground: bool,
 }
 
 #[derive(Resource)]
 struct FlyCam {
     yaw: f32,
     pitch: f32,
+    /// False while the player is walking; the fly camera then leaves the view alone.
+    walking: bool,
 }
 
 impl FlyCam {
@@ -163,6 +206,7 @@ impl FlyCam {
         Self {
             yaw: f32::atan2(-direction.x, -direction.z),
             pitch: f32::atan2(direction.y, horizontal),
+            walking: false,
         }
     }
 }
@@ -178,23 +222,25 @@ struct WorldRootMarker;
 #[derive(Resource, Clone, Copy)]
 struct WorldRoot(Entity);
 
+/// Turns the view and switches between walking and flying.
+///
+/// Look is its own system because both modes need it: the fly camera moves the view
+/// itself, the walking player places the camera at their eye, but either way the mouse
+/// has to turn it.
 #[expect(
     clippy::needless_pass_by_value,
     reason = "Bevy system parameters are taken by value by design"
 )]
-fn fly_camera(
-    time: Res<'_, Time>,
+fn look(
     keys: Res<'_, ButtonInput<KeyCode>>,
     buttons: Res<'_, ButtonInput<MouseButton>>,
     mut motion: MessageReader<'_, '_, MouseMotion>,
     mut state: ResMut<'_, FlyCam>,
-    mut camera: Query<'_, '_, &mut Transform, With<FlyCamMarker>>,
 ) {
-    let speed = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
-        FLY_SPEED * SPRINT
-    } else {
-        FLY_SPEED
-    };
+    if keys.just_pressed(KeyCode::KeyF) {
+        state.walking = !state.walking;
+        println!("mode: {}", if state.walking { "walk" } else { "fly" });
+    }
 
     let looking = buttons.pressed(MouseButton::Left);
 
@@ -204,6 +250,27 @@ fn fly_camera(
             state.pitch = f32::mul_add(event.delta.y, -0.003, state.pitch).clamp(-1.5, 1.5);
         }
     }
+}
+
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are taken by value by design"
+)]
+fn fly_camera(
+    time: Res<'_, Time>,
+    keys: Res<'_, ButtonInput<KeyCode>>,
+    state: Res<'_, FlyCam>,
+    mut camera: Query<'_, '_, &mut Transform, With<FlyCamMarker>>,
+) {
+    if state.walking {
+        return;
+    }
+
+    let speed = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+        FLY_SPEED * SPRINT
+    } else {
+        FLY_SPEED
+    };
 
     let Ok(mut transform) = camera.single_mut() else {
         return;
@@ -240,6 +307,7 @@ fn fly_camera(
     }
 }
 
+/// Streams the cells around the camera and spawns what they place.
 #[expect(
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
@@ -254,6 +322,7 @@ fn stream_cells(
     mut images: ResMut<'_, Assets<Image>>,
     mut textures: ResMut<'_, TextureCache>,
     root: Res<'_, WorldRoot>,
+    colliders: Res<'_, CollisionSet>,
 ) {
     let Ok(transform) = camera.single() else {
         return;
@@ -351,12 +420,144 @@ fn stream_cells(
                 stream.spawned += 1;
                 spawned_this_frame += 1;
             }
+
+            // Collision for the same instance, when the install models it. One collider
+            // per model, referenced by every instance of it.
+            if let Some(collider) = colliders.0.get(&definition.model) {
+                let index = if let Some(&known) = stream.colliders.get(&definition.model) {
+                    known
+                } else {
+                    let added = stream.physics.add_collider(collider.clone());
+                    let _ = stream.colliders.insert(definition.model.clone(), added);
+
+                    added
+                };
+                let (min, max) = collider.bounds();
+
+                stream.physics.place(
+                    index,
+                    Placement {
+                        position: instance.position,
+                        rotation: instance.rotation,
+                        scale: instance.scale,
+                    },
+                    (min, max),
+                );
+            }
         }
 
         if complete {
             let _ = stream.loaded.insert(key);
             let _ = stream.cursors.remove(&key);
         }
+    }
+}
+
+/// Moves the player, in game coordinates, and puts the camera at their eye.
+///
+/// The collision queries are the ones `vc_physics` already provides: a downward ray
+/// for the ground and a directional cast for walls. Where a cell has no collision at
+/// all - beaches and props are not collidable in Vice City - the player is held at
+/// the water line rather than falling out of the world.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are taken by value by design"
+)]
+fn walk_player(
+    time: Res<'_, Time>,
+    keys: Res<'_, ButtonInput<KeyCode>>,
+    state: Res<'_, FlyCam>,
+    mut player: ResMut<'_, Player>,
+    stream: Res<'_, Stream>,
+    mut camera: Query<'_, '_, &mut Transform, With<FlyCamMarker>>,
+) {
+    if !state.walking {
+        return;
+    }
+
+    let dt = time.delta_secs().min(0.1);
+    let (sin, cos) = state.yaw.sin_cos();
+    let forward = Vec3::new(-sin, cos, 0.0);
+    let right = Vec3::new(cos, sin, 0.0);
+
+    let mut desired = Vec3::ZERO;
+
+    if keys.pressed(KeyCode::KeyW) {
+        desired += forward;
+    }
+    if keys.pressed(KeyCode::KeyS) {
+        desired -= forward;
+    }
+    if keys.pressed(KeyCode::KeyD) {
+        desired += right;
+    }
+    if keys.pressed(KeyCode::KeyA) {
+        desired -= right;
+    }
+
+    let speed = if keys.pressed(KeyCode::ShiftLeft) {
+        WALK_SPEED * 2.0
+    } else {
+        WALK_SPEED
+    };
+    let horizontal = desired.normalize_or_zero() * speed;
+
+    player.velocity.x = horizontal.x;
+    player.velocity.y = horizontal.y;
+
+    if player.on_ground && keys.just_pressed(KeyCode::Space) {
+        player.velocity.z = 5.5;
+        player.on_ground = false;
+    }
+
+    player.velocity.z = GRAVITY.mul_add(-dt, player.velocity.z);
+
+    // Walls: stop short in the direction of travel.
+    let step = horizontal.length() * dt;
+    let mut moved = horizontal;
+
+    if step > 0.0 {
+        let origin = player.position + Vec3::Z * 1.0;
+        let direction = horizontal.normalize();
+        let reach = step + PLAYER_RADIUS;
+        let hit = stream
+            .physics
+            .cast(origin.to_array(), direction.to_array(), reach);
+
+        if hit < reach {
+            moved = Vec3::ZERO;
+        }
+    }
+
+    let fall = Vec3::Z * (player.velocity.z * dt);
+    player.position += moved * dt + fall;
+
+    // Ground: snap when the surface is within a step, otherwise keep falling.
+    let probe = player.position + Vec3::Z * 0.5;
+    let ground = stream.physics.ground(probe.to_array(), 4.0);
+    player.on_ground = false;
+
+    if let Some(height) = ground
+        && player.position.z <= height + 0.4
+    {
+        player.position.z = height;
+        player.velocity.z = 0.0;
+        player.on_ground = true;
+    }
+
+    // No collision under this spot: hold at the water line rather than dropping out.
+    if ground.is_none() && player.position.z < 6.0 {
+        player.position.z = 6.0;
+        player.velocity.z = 0.0;
+        player.on_ground = true;
+    }
+
+    let eye = player.position + Vec3::Z * EYE_HEIGHT;
+    let rotation = Quat::from_rotation_y(state.yaw) * Quat::from_rotation_x(state.pitch);
+
+    if let Ok(mut transform) = camera.single_mut() {
+        transform.translation = to_bevy_position(eye.to_array());
+        transform.rotation = rotation;
     }
 }
 

@@ -15,6 +15,7 @@ anyhow.workspace = true
 bevy.workspace = true
 vc_cook.workspace = true
 vc_render.workspace = true
+vc_physics.workspace = true
 vc_stream.workspace = true
 vc_timecyc.workspace = true
 vc_transport.workspace = true
