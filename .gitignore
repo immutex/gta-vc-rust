@@ -14,3 +14,6 @@ context/
 # Editor / OS
 .DS_Store
 *.pdb
+
+# Offscreen captures, for looking at a frame.
+/shot*.png

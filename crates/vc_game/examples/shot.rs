@@ -36,6 +36,12 @@ struct Shot {
 fn main() -> Result<(), Box<dyn Error>> {
     let mut arguments = std::env::args().skip(1);
     let path = arguments.next().unwrap_or_else(|| "shot.png".to_owned());
+    // Printed as an absolute path so the file can be found from anywhere, and so the
+    // command works with no arguments at all.
+    let absolute = std::env::current_dir()
+        .map_or_else(|_| std::path::PathBuf::from(&path), |dir| dir.join(&path));
+    println!("writing {}", absolute.display());
+    let path = absolute.display().to_string();
     let cell_x = arguments.next().and_then(|value| value.parse::<i32>().ok());
     let cell_y = arguments.next().and_then(|value| value.parse::<i32>().ok());
     let hour = arguments
