@@ -463,6 +463,30 @@ and prints the counts above, which is how the LOD, interior and normal fixes wer
 `examples/shot.rs` renders a frame to an image through Vulkan's lavapipe, which is slow but needs no
 display server.
 
+### 4.28 The road lights are in the data, and we were dropping them
+
+Every IDE file carries a `2dfx` section: the authored light for each lamp, sign and shop
+window. The layout is `id, x, y, z, type, r, g, b, a, texture, shadow-texture, size, …`,
+so the type, colour and size are all there. The parser kept only the offset, which is why
+the city was lit by a global ambient term and nothing else.
+
+| Type | Rows | What it is |
+|---|---|---|
+| 255 | 491 | street lighting, warm white `(255,255,200)` on 244 rows, blue signage on 49 |
+| 184 | 68 | warm `(255,0,120)` |
+| 185 | 53 | warm grey |
+| 0 | 43 | assorted |
+
+Instancing them across every placement gives **3,511 point lights** — far more than a
+forward renderer should carry — so the runtime keeps the nearest **96**, rebuilt after the
+camera travels 60 units, and switches them on outside 06:00-19:00 as the original did.
+They cast no shadows: a lamp's own pool is what the eye expects, and shadow maps per lamp
+would cost more than the whole world.
+
+This is what the prelit shade floor (§4.26) was standing in for. The floor stays for the
+daylight case, where the original's baked sun is the only light and a quarter of the
+vertices are still near black because a dynamic light would have been added at runtime.
+
 ### 4.26 Modern lighting and draw budget
 
 The resident renderer lights the map physically: a directional sun from `timecyc` with two shadow
