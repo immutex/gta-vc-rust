@@ -180,7 +180,7 @@ fn setup_world(
         baked.stats.failed,
         started.elapsed().as_secs_f32(),
     );
-    stats.0 = baked.stats;
+    stats.0 = baked.stats.clone();
 
     world::spawn(&mut commands, baked, sky.fog_end);
 

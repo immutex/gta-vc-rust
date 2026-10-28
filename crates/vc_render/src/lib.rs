@@ -390,12 +390,21 @@ impl Batcher {
 
         for mesh in &model.meshes {
             for group in &mesh.groups {
-                let Some(texture) = group.texture.as_ref() else {
-                    self.push_group(None, mesh, &group.indices, placement, to_linear);
+                let colour = Vec4::from_array(group.colour);
 
-                    continue;
-                };
-                self.push_group(Some(texture), mesh, &group.indices, placement, to_linear);
+                match group.texture.as_ref() {
+                    Some(texture) => self.push_group(
+                        Some(texture),
+                        colour,
+                        mesh,
+                        &group.indices,
+                        placement,
+                        to_linear,
+                    ),
+                    None => {
+                        self.push_group(None, colour, mesh, &group.indices, placement, to_linear);
+                    }
+                }
             }
         }
     }
@@ -403,6 +412,7 @@ impl Batcher {
     fn push_group(
         &mut self,
         texture: Option<&Arc<CookedTexture>>,
+        colour: Vec4,
         mesh: &vc_stream::CookedMesh,
         indices: &[u32],
         placement: &Placement,
@@ -438,6 +448,11 @@ impl Batcher {
                 self.remap[*index as usize] = next;
                 bucket.min = bucket.min.min(position);
                 bucket.max = bucket.max.max(position);
+                // Texture x material x prelit, which is the multiply the original
+                // fixed-function pipeline performed. Folding the material colour into
+                // the vertex keeps one bucket per texture however many materials share
+                // it, and gives untextured geometry - the beach, painted lines - the
+                // colour the artists authored instead of a flat stand-in.
                 bucket.vertices.push(Vertex {
                     position,
                     normal,
@@ -447,7 +462,7 @@ impl Batcher {
                         to_linear[usize::from(source.colour[1])].max(PRELIT_FLOOR),
                         to_linear[usize::from(source.colour[2])].max(PRELIT_FLOOR),
                         f32::from(source.colour[3]) / 255.0,
-                    ),
+                    ) * colour,
                 });
                 bucket.indices.push(next);
             } else {
@@ -633,10 +648,12 @@ mod tests {
                 ],
                 groups: vec![
                     vc_stream::MaterialGroup {
+                        colour: [1.0; 4],
                         texture: None,
                         indices: vec![0, 1, 2],
                     },
                     vc_stream::MaterialGroup {
+                        colour: [1.0; 4],
                         texture: None,
                         indices: vec![3, 4, 5],
                     },

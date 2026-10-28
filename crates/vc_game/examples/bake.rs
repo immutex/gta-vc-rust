@@ -72,6 +72,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         images.len(),
     );
     println!("models failed: {}", baked.stats.failed);
+    println!(
+        "tinted groups: {} of {}, samples {:?}",
+        baked.stats.tinted, baked.stats.groups, baked.stats.tints
+    );
+    println!(
+        "material groups: {} ({} name no texture, {:.2}%)",
+        baked.stats.groups,
+        baked.stats.untextured,
+        100.0 * baked.stats.untextured as f32 / baked.stats.groups.max(1) as f32,
+    );
+    let stats = streamer.stats();
+    println!(
+        "streamer groups: {} untextured, {} named a texture nothing holds",
+        stats.untextured_groups, stats.unresolved_groups
+    );
 
     let mut zero_normals = 0usize;
     let mut min = Vec3::splat(f32::INFINITY);

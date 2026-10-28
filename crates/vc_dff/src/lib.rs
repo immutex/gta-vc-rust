@@ -566,12 +566,17 @@ pub fn summarize(bytes: &[u8]) -> Result<Clump, DffError> {
 }
 
 /// One material slot of a geometry: the texture it uses and its alpha mask.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct MaterialRef {
     /// Diffuse texture name, empty when the slot carries none.
     pub texture: String,
     /// Alpha mask texture name, empty when there is none.
     pub alpha_mask: String,
+    /// Material colour, multiplied into the surface the way the original did it.
+    ///
+    /// A slot with no texture draws in exactly this colour, which is how the beach and
+    /// a lot of road paint are coloured - the pale sand has no texture to inherit from.
+    pub colour: [f32; 4],
 }
 
 /// Bytes per frame in a frame list: a 3x3 rotation, a position, a parent index and
@@ -719,6 +724,7 @@ pub fn read_materials(geometry: &Section<'_>) -> Result<Vec<MaterialRef>, DffErr
     // is best-effort: a material that cannot be read keeps its slot, with no name.
     for material in list.children_of(SectionKind::MATERIAL).unwrap_or_default() {
         let mut names = Vec::new();
+        let colour = material_colour(&material);
 
         for texture in material
             .children_of(SectionKind::TEXTURE)
@@ -734,10 +740,33 @@ pub fn read_materials(geometry: &Section<'_>) -> Result<Vec<MaterialRef>, DffErr
         materials.push(MaterialRef {
             texture: names.first().cloned().unwrap_or_default(),
             alpha_mask: names.get(1).cloned().unwrap_or_default(),
+            colour,
         });
     }
 
     Ok(materials)
+}
+
+/// The colour of a material.
+///
+/// A material chunk is a container whose `STRUCT` child holds
+/// `{ i32 flags; RGBA colour; i32 unused; i32 is_textured }`, so the colour is four
+/// bytes at offset 4 of that struct. Reading the container's own payload reads the
+/// chunk header instead, which is how every surface once came out the same shade.
+fn material_colour(material: &Section<'_>) -> [f32; 4] {
+    let Some(data) = material.child(SectionKind::STRUCT).unwrap_or(None) else {
+        return [1.0; 4];
+    };
+    let Some(bytes) = data.payload().get(4..8) else {
+        return [1.0; 4];
+    };
+
+    [
+        f32::from(bytes[0]) / 255.0,
+        f32::from(bytes[1]) / 255.0,
+        f32::from(bytes[2]) / 255.0,
+        f32::from(bytes[3]) / 255.0,
+    ]
 }
 
 /// Reads a string chunk as NUL-terminated ASCII, ignoring binary payloads.

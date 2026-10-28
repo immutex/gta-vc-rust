@@ -252,7 +252,7 @@ pub struct BakedWorld {
 }
 
 /// Counters from one bake.
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone)]
 pub struct BakeStats {
     /// Chunks with geometry.
     pub chunks: usize,
@@ -266,6 +266,16 @@ pub struct BakeStats {
     pub textures: usize,
     /// Models that failed to cook.
     pub failed: usize,
+    /// Material groups across the map.
+    pub groups: usize,
+    /// Groups that name a texture no dictionary holds.
+    pub unresolved: usize,
+    /// Groups that name no texture at all.
+    pub untextured: usize,
+    /// Groups whose material colour is not white.
+    pub tinted: usize,
+    /// The tinted colours, for inspecting what the data actually holds.
+    pub tints: Vec<[f32; 4]>,
 }
 
 /// Bakes every chunk into merged meshes and registers collision.
@@ -322,6 +332,31 @@ pub fn bake(
                 continue;
             };
             let placement = Placement::new(instance.position, instance.rotation, instance.scale);
+            for mesh in &model.meshes {
+                for group in &mesh.groups {
+                    stats.groups += 1;
+
+                    match &group.texture {
+                        Some(_) => {}
+                        // Either the model names no texture, or it names one no
+                        // dictionary holds - the second is a hole the eye reads as a
+                        // pale patch, so the two are counted apart.
+                        None => stats.untextured += 1,
+                    }
+
+                    // Bytes come from a /255 division, so an exact white is exact.
+                    if group
+                        .colour
+                        .iter()
+                        .any(|channel| (channel - 1.0).abs() > 1e-6)
+                    {
+                        stats.tinted += 1;
+                        if stats.tints.len() < 12 {
+                            stats.tints.push(group.colour);
+                        }
+                    }
+                }
+            }
             batcher.push(model, &placement);
 
             if let Some(definition) = plan.definitions.get(&instance.definition_id) {

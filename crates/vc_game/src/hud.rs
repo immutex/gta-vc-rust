@@ -7,7 +7,7 @@ use crate::camera::FlyCamMarker;
 use crate::world::BakeStats;
 
 /// The baked scene's counters, shared with the overlay.
-#[derive(Resource, Default, Clone, Copy)]
+#[derive(Resource, Default, Clone)]
 pub struct Stats(pub BakeStats);
 
 /// Marks the overlay text.

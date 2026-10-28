@@ -28,8 +28,17 @@ use vc_world::ObjectDefinition;
 pub struct MaterialGroup {
     /// Cooked texture, shared with the dictionary cache.
     pub texture: Option<Arc<CookedTexture>>,
+    /// Material colour, multiplied into the surface.
+    pub colour: [f32; 4],
     /// Triangle indices into the mesh's vertex list.
     pub indices: Vec<u32>,
+}
+
+/// One material slot while triangles are being sorted into groups.
+struct Slot {
+    texture: Option<Arc<CookedTexture>>,
+    colour: [f32; 4],
+    indices: Vec<u32>,
 }
 
 /// A geometry ready to upload.
@@ -76,6 +85,10 @@ pub struct StreamStats {
     pub failures: u64,
     /// Material texture names that no dictionary matched, for diagnosis.
     pub missing: Vec<String>,
+    /// Groups whose texture name matched nothing, across every model cooked.
+    pub unresolved_groups: u64,
+    /// Groups that name no texture at all, across every model cooked.
+    pub untextured_groups: u64,
     /// A few keys from the first dictionary parsed, for diagnosis.
     pub keys: Vec<String>,
 }
@@ -236,7 +249,15 @@ impl Streamer {
     fn resolve(&mut self, name: &str, hint: &str) -> Option<Arc<CookedTexture>> {
         let key = name.to_ascii_lowercase();
 
-        if key.is_empty() || self.missing.contains(&key) {
+        if key.is_empty() {
+            self.stats.untextured_groups += 1;
+
+            return None;
+        }
+
+        if self.missing.contains(&key) {
+            self.stats.unresolved_groups += 1;
+
             return None;
         }
 
@@ -273,6 +294,7 @@ impl Streamer {
         }
 
         let _ = self.missing.insert(key);
+        self.stats.unresolved_groups += 1;
 
         None
     }
@@ -382,31 +404,42 @@ fn build_model(
             .collect();
 
         // Group triangles by material slot so each texture gets its own draw.
-        let mut slots: Vec<(Option<Arc<CookedTexture>>, Vec<u32>)> =
-            Vec::with_capacity(geometry.materials.len());
+        let mut slots: Vec<Slot> = Vec::with_capacity(geometry.materials.len());
 
         for (material, texture) in geometry.materials.iter().zip(textures) {
             if texture.is_none() && stats.missing.len() < 8 {
                 stats.missing.push(material.texture.clone());
             }
 
-            slots.push((texture.clone(), Vec::new()));
+            slots.push(Slot {
+                texture: texture.clone(),
+                colour: material.colour,
+                indices: Vec::new(),
+            });
         }
 
         if slots.is_empty() {
-            slots.push((None, Vec::new()));
+            slots.push(Slot {
+                texture: None,
+                colour: [1.0; 4],
+                indices: Vec::new(),
+            });
         }
 
         for triangle in &geometry.decoded.triangles {
             let slot = usize::from(triangle.material).min(slots.len() - 1);
-            let group = &mut slots[slot].1;
+            let group = &mut slots[slot].indices;
             group.extend(triangle.indices.map(u32::from));
         }
 
         let groups = slots
             .into_iter()
-            .filter(|(_, indices)| !indices.is_empty())
-            .map(|(texture, indices)| MaterialGroup { texture, indices })
+            .filter(|slot| !slot.indices.is_empty())
+            .map(|slot| MaterialGroup {
+                texture: slot.texture,
+                colour: slot.colour,
+                indices: slot.indices,
+            })
             .collect();
 
         meshes.push(CookedMesh { vertices, groups });
@@ -596,6 +629,7 @@ mod tests {
                 .map(|found| MaterialRef {
                     texture: format!("tex{found}"),
                     alpha_mask: String::new(),
+                    colour: [1.0; 4],
                 })
                 .collect(),
         }
