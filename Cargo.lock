@@ -4482,6 +4482,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bevy",
+ "png",
  "vc_cook",
  "vc_physics",
  "vc_render",

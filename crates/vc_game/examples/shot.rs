@@ -159,6 +159,35 @@ fn setup_world(
     world::spawn(&mut commands, baked, sky.fog_end);
 }
 
+/// Mean brightness and colour spread of a saved capture.
+fn describe(path: &std::path::Path) -> Result<String, Box<dyn std::error::Error>> {
+    let file = std::fs::File::open(path)?;
+    let decoder = png::Decoder::new(std::io::BufReader::new(file));
+    let mut reader = decoder.read_info()?;
+    let mut buffer = vec![0; reader.output_buffer_size().unwrap_or(0)];
+    let info = reader.next_frame(&mut buffer)?;
+    let pixels = &buffer[..info.buffer_size()];
+
+    if pixels.is_empty() {
+        return Ok("no pixels".to_owned());
+    }
+
+    let sample = pixels.iter().take(3 * 4096);
+    let count = sample.clone().count();
+    let (mut sum, mut low, mut high) = (0.0f64, 255u8, 0u8);
+    for channel in sample {
+        sum += f64::from(*channel);
+        low = low.min(*channel);
+        high = high.max(*channel);
+    }
+    let mean = sum / f64::from(u32::try_from(count).unwrap_or(1));
+
+    Ok(format!(
+        "mean {mean:.1} of 255, range {low}..{high}, {} bytes",
+        pixels.len()
+    ))
+}
+
 #[expect(
     clippy::needless_pass_by_value,
     reason = "Bevy system parameters are taken by value by design"
@@ -229,6 +258,12 @@ fn capture(
             shot.path,
             std::fs::metadata(written).map_or(0, |meta| meta.len())
         );
+        // A black frame is indistinguishable from a broken capture without reading it
+        // back, and this is the only place the two can be told apart.
+        match describe(written) {
+            Ok(summary) => println!("image: {summary}"),
+            Err(error) => println!("image: cannot read it back: {error}"),
+        }
         exit.write(AppExit::Success);
     }
 

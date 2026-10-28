@@ -21,5 +21,9 @@ vc_timecyc.workspace = true
 vc_transport.workspace = true
 vc_world.workspace = true
 
+[dev-dependencies]
+# Reading back the offscreen capture, so a black frame reports itself.
+png.workspace = true
+
 [lints]
 workspace = true
