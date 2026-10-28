@@ -160,6 +160,19 @@ fn setup_world(
         println!("first part bounds: {:?}", part.bounds);
     }
     world::spawn(&mut commands, baked, sky.fog_end);
+
+    // The capture draws the sea too. Without it a shoreline cell renders as clear colour,
+    // which is indistinguishable from missing ground - the reason three of these frames
+    // were misread.
+    world::spawn_water(
+        &mut commands,
+        &mut source.0,
+        &mut textures,
+        &mut standard,
+        &mut meshes,
+        &mut images,
+        &sky,
+    );
 }
 
 /// Reads a point from the environment, spelled `x,y,z`.

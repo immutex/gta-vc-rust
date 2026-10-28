@@ -7,9 +7,8 @@
 
 use std::error::Error;
 
-use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
-use vc_render::{MaterialCache, TextureCache, to_bevy_position, water_material};
+use vc_render::{MaterialCache, TextureCache, to_bevy_position};
 use vc_stream::{Colliders, Streamer};
 use vc_transport::{GameRoot, ImageArchive};
 use vc_world::CellKey;
@@ -263,7 +262,7 @@ fn setup_world(
 
     world::spawn(&mut commands, baked, sky.fog_end);
 
-    spawn_water(
+    world::spawn_water(
         &mut commands,
         &mut source.0,
         &mut textures,
@@ -272,65 +271,6 @@ fn setup_world(
         &mut images,
         &sky,
     );
-}
-
-fn spawn_water(
-    commands: &mut Commands<'_, '_>,
-    streamer: &mut Streamer,
-    textures: &mut TextureCache,
-    materials: &mut Assets<StandardMaterial>,
-    meshes: &mut Assets<Mesh>,
-    images: &mut Assets<Image>,
-    sky: &Sky,
-) {
-    let Some(texture) = streamer.texture("particle", "waterclear256") else {
-        println!("water: waterclear256 not found, skipping the ocean");
-
-        return;
-    };
-    textures.upload_batch(std::slice::from_ref(&texture), images);
-    let material = water_material(
-        sky.water,
-        textures.handle(&texture).unwrap_or_default(),
-        materials,
-    );
-
-    commands.spawn((
-        Mesh3d(meshes.add(water_mesh())),
-        MeshMaterial3d(material),
-        Transform::IDENTITY,
-        NotShadowCaster,
-    ));
-    println!("water: quad at 6, tinted from timecyc");
-}
-
-/// The ocean: one quad at the height and extent `water.dat` specifies, in Bevy axes.
-fn water_mesh() -> Mesh {
-    let extent = 3_000.0;
-    let level = 6.0;
-    let tiles = 64.0;
-    let mut mesh = Mesh::new(
-        bevy::mesh::PrimitiveTopology::TriangleList,
-        bevy::asset::RenderAssetUsages::default(),
-    );
-    mesh.insert_attribute(
-        Mesh::ATTRIBUTE_POSITION,
-        vec![
-            [-extent, level, -extent],
-            [extent, level, -extent],
-            [extent, level, extent],
-            [-extent, level, extent],
-        ],
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; 4]);
-    mesh.insert_attribute(
-        Mesh::ATTRIBUTE_UV_0,
-        vec![[0.0, 0.0], [tiles, 0.0], [tiles, tiles], [0.0, tiles]],
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0, 1.0, 1.0, 1.0]; 4]);
-    mesh.insert_indices(bevy::mesh::Indices::U32(vec![0, 2, 1, 0, 3, 2]));
-
-    mesh
 }
 
 #[expect(
