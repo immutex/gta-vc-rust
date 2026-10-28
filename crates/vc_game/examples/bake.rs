@@ -25,7 +25,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         started.elapsed().as_secs_f32()
     );
 
-    let plan = WorldPlan::new(world::load(&root.path().join("data/maps"))?);
+    let (world, effects) = world::load(&root.path().join("data/maps"))?;
+    let plan = WorldPlan::new(world, &effects);
     println!(
         "world: {} placements, {} LOD, {} interior, {} unknown dropped",
         plan.instances.len(),
@@ -87,6 +88,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "streamer groups: {} untextured, {} named a texture nothing holds",
         stats.untextured_groups, stats.unresolved_groups
     );
+    println!("authored lights: {}", plan.lights.len());
 
     let mut zero_normals = 0usize;
     let mut min = Vec3::splat(f32::INFINITY);

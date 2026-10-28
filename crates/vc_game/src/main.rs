@@ -33,7 +33,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let indexed = streamer.warm_textures();
     println!("textures: {indexed} indexed");
 
-    let plan = WorldPlan::new(world::load(&root.path().join("data/maps"))?);
+    let (world, effects) = world::load(&root.path().join("data/maps"))?;
+    let plan = WorldPlan::new(world, &effects);
     println!(
         "world: {} placements ({} LOD, {} interior, {} unknown dropped)",
         plan.instances.len(),
@@ -79,6 +80,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .init_resource::<TextureCache>()
         .init_resource::<MaterialCache>()
         .init_resource::<Stats>()
+        .init_resource::<world::ActiveLights>()
         .add_systems(
             Startup,
             (setup_world, setup_lighting, setup_camera, hud::spawn),
@@ -87,6 +89,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Update,
             (
                 vc_game::camera::look,
+                world::update_lights,
                 vc_game::camera::fly,
                 vc_game::camera::walk,
                 hud::update,

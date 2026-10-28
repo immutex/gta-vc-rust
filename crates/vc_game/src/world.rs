@@ -17,6 +17,10 @@ use std::sync::Arc;
 use bevy::camera::visibility::VisibilityRange;
 use bevy::prelude::*;
 use vc_physics::{Placement as PhysicsPlacement, StaticWorld};
+use vc_render::to_bevy_position;
+
+use crate::camera::FlyCamMarker;
+use crate::sky::Sky;
 use vc_render::{Batcher, MaterialCache, Placement, TextureCache};
 use vc_stream::{Colliders, CookedModel, Streamer};
 use vc_world::{CELL_SIZE, CellKey, Instance, ObjectDefinition, World};
@@ -68,12 +72,25 @@ pub struct WorldPlan {
     pub dropped_interior: usize,
     /// Placements dropped because their definition is missing.
     pub dropped_unknown: usize,
+    /// Authored lights over the roads, in world space.
+    pub lights: Vec<LightPoint>,
+}
+
+/// One authored light: where it is, what colour it is, how far it reaches.
+#[derive(Debug, Clone, Copy)]
+pub struct LightPoint {
+    /// World position, in Bevy's axes.
+    pub position: Vec3,
+    /// Authored colour.
+    pub colour: [u8; 3],
+    /// Reach in world units.
+    pub range: f32,
 }
 
 impl WorldPlan {
     /// Filters a loaded map and fixes its rotations.
     #[must_use]
-    pub fn new(world: World) -> Self {
+    pub fn new(world: World, effects: &[vc_world::Effect]) -> Self {
         let definitions: HashMap<u32, ObjectDefinition> = world
             .definitions
             .into_iter()
@@ -154,6 +171,31 @@ impl WorldPlan {
                 .push(index as u32);
         }
 
+        // The authored lights sit where the lamp heads are, so the instance transform
+        // places them exactly; 500-odd lamps light the whole road network at night.
+        let mut lights = Vec::new();
+        for effect in effects {
+            if !is_light(effect.kind) {
+                continue;
+            }
+
+            for instance in instances
+                .iter()
+                .filter(|instance| instance.definition_id == effect.definition_id)
+            {
+                lights.push(LightPoint {
+                    position: to_bevy_position(place(
+                        effect.offset,
+                        instance.position,
+                        instance.rotation,
+                        instance.scale,
+                    )),
+                    colour: effect.colour,
+                    range: effect.size.clamp(6.0, 24.0),
+                });
+            }
+        }
+
         Self {
             definitions,
             instances,
@@ -161,6 +203,7 @@ impl WorldPlan {
             dropped_lod,
             dropped_interior,
             dropped_unknown,
+            lights,
         }
     }
 
@@ -183,6 +226,28 @@ impl WorldPlan {
             .max_by_key(|(cell, count)| (*count, std::cmp::Reverse(*cell)))
             .map_or([0.0; 3], |(cell, _)| cell.centre(CELL_SIZE))
     }
+}
+
+/// Whether an effect type is an authored light.
+const fn is_light(kind: u32) -> bool {
+    matches!(kind, 255 | 0 | 228)
+}
+
+/// Places a model-space point in the world, in the game's axes.
+fn place(point: [f32; 3], position: [f32; 3], rotation: [f32; 4], scale: [f32; 3]) -> [f32; 3] {
+    let local = Quat::from_xyzw(rotation[0], rotation[1], rotation[2], rotation[3]);
+    let scaled = Vec3::new(
+        point[0] * scale[0],
+        point[1] * scale[1],
+        point[2] * scale[2],
+    );
+    let turned = local * scaled;
+
+    [
+        position[0] + turned.x,
+        position[1] + turned.y,
+        position[2] + turned.z,
+    ]
 }
 
 /// Flips an instance into the rotation sense the game uses.
@@ -217,6 +282,104 @@ pub fn is_lod(model: &str) -> bool {
 }
 
 /// Spawns one baked mesh per part, with blend materials excluded from shadows.
+/// Authored lights the map places: thousands, once per placement.
+///
+/// Only the nearest handful are ever spawned.
+pub const MAX_LIGHTS: usize = 96;
+
+/// How far the camera may travel before the nearest set is recomputed.
+pub const LIGHT_RADIUS: f32 = 60.0;
+
+/// The authored lights currently in the scene, and where they were chosen from.
+#[derive(Resource, Default)]
+pub struct ActiveLights {
+    entities: Vec<Entity>,
+    centre: Vec3,
+    spawned: bool,
+}
+
+impl ActiveLights {
+    /// How many lights are live.
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.entities.len()
+    }
+
+    /// Whether no light is live.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.entities.is_empty()
+    }
+}
+
+/// Keeps the nearest authored lights spawned around the camera.
+///
+/// 3,511 of them exist and spawning them all would cost more than the world does, so
+/// the set is the nearest [`MAX_LIGHTS`] and is rebuilt only after the camera has moved
+/// [`LIGHT_RADIUS`].
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are taken by value by design"
+)]
+pub fn update_lights(
+    mut commands: Commands<'_, '_>,
+    plan: Res<'_, WorldPlan>,
+    sky: Res<'_, Sky>,
+    camera: Query<'_, '_, &GlobalTransform, With<FlyCamMarker>>,
+    mut active: ResMut<'_, ActiveLights>,
+) {
+    let night = !(6..19).contains(&sky.hour);
+    let Ok(camera) = camera.single() else {
+        return;
+    };
+    let centre = camera.translation();
+
+    if active.spawned
+        && night != active.entities.is_empty()
+        && centre.distance(active.centre) < LIGHT_RADIUS
+    {
+        return;
+    }
+
+    for entity in active.entities.drain(..) {
+        commands.entity(entity).despawn();
+    }
+
+    active.centre = centre;
+    active.spawned = true;
+
+    if !night {
+        return;
+    }
+
+    let mut nearest: Vec<&LightPoint> = plan
+        .lights
+        .iter()
+        .filter(|light| light.position.distance(centre) < 400.0)
+        .collect();
+    nearest.sort_by(|left, right| {
+        left.position
+            .distance_squared(centre)
+            .total_cmp(&right.position.distance_squared(centre))
+    });
+
+    for light in nearest.into_iter().take(MAX_LIGHTS) {
+        let entity = commands
+            .spawn((
+                PointLight {
+                    color: Color::srgb_u8(light.colour[0], light.colour[1], light.colour[2]),
+                    intensity: 400_000.0,
+                    range: light.range,
+                    shadow_maps_enabled: false,
+                    ..PointLight::default()
+                },
+                Transform::from_translation(light.position),
+            ))
+            .id();
+        active.entities.push(entity);
+    }
+}
+
 /// Spawns the baked parts, culled beyond `draw_distance`.
 ///
 /// The far end is the fog's own range: the map is fully fogged out by then, so
@@ -435,8 +598,9 @@ fn register_collision(
 ///
 /// # Errors
 /// Returns an error when the directory or one of its files cannot be read.
-pub fn load(directory: &Path) -> Result<World, Box<dyn Error>> {
+pub fn load(directory: &Path) -> Result<(World, Vec<vc_world::Effect>), Box<dyn Error>> {
     let mut world = World::default();
+    let mut effects = Vec::new();
     let mut paths = Vec::new();
     collect(directory, &mut paths)?;
 
@@ -444,10 +608,16 @@ pub fn load(directory: &Path) -> Result<World, Box<dyn Error>> {
         let text = String::from_utf8_lossy(&fs::read(path)?).into_owned();
 
         match path.extension().and_then(|extension| extension.to_str()) {
-            Some("ide") => match vc_world::parse_definitions(&text) {
-                Ok(definitions) => world.definitions.extend(definitions),
-                Err(error) => println!("skip {}: {error}", path.display()),
-            },
+            Some("ide") => {
+                match vc_world::parse_definitions(&text) {
+                    Ok(definitions) => world.definitions.extend(definitions),
+                    Err(error) => println!("skip {}: {error}", path.display()),
+                }
+                match vc_world::parse_effects(&text) {
+                    Ok(found) => effects.extend(found),
+                    Err(error) => println!("skip effects {}: {error}", path.display()),
+                }
+            }
             Some("ipl") => match vc_world::parse_instances(&text) {
                 Ok(instances) => world.instances.extend(instances),
                 Err(error) => println!("skip {}: {error}", path.display()),
@@ -456,7 +626,7 @@ pub fn load(directory: &Path) -> Result<World, Box<dyn Error>> {
         }
     }
 
-    Ok(world)
+    Ok((world, effects))
 }
 
 fn collect(directory: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
@@ -515,7 +685,7 @@ mod tests {
 
     #[test]
     fn keeps_a_shell_that_has_no_detail_counterpart() {
-        let plan = WorldPlan::new(world(vec![instance(2, "LODroad", 0, [0.0; 3])]));
+        let plan = WorldPlan::new(world(vec![instance(2, "LODroad", 0, [0.0; 3])]), &[]);
 
         assert_eq!(plan.instances.len(), 1);
         assert_eq!(plan.dropped_lod, 0);
@@ -523,10 +693,13 @@ mod tests {
 
     #[test]
     fn drops_a_shell_that_duplicates_detail_geometry() {
-        let plan = WorldPlan::new(world(vec![
-            instance(1, "road", 0, [0.0; 3]),
-            instance(2, "LODroad", 0, [0.0; 3]),
-        ]));
+        let plan = WorldPlan::new(
+            world(vec![
+                instance(1, "road", 0, [0.0; 3]),
+                instance(2, "LODroad", 0, [0.0; 3]),
+            ]),
+            &[],
+        );
 
         assert_eq!(plan.instances.len(), 1);
         assert_eq!(plan.instances[0].definition_id, 1);
@@ -535,10 +708,13 @@ mod tests {
 
     #[test]
     fn rescues_an_outdoor_placement_tagged_with_an_interior() {
-        let plan = WorldPlan::new(world(vec![
-            instance(1, "road", 13, [10.0, 20.0, 5.0]),
-            instance(2, "LODroad", 0, [10.0, 20.0, 5.0]),
-        ]));
+        let plan = WorldPlan::new(
+            world(vec![
+                instance(1, "road", 13, [10.0, 20.0, 5.0]),
+                instance(2, "LODroad", 0, [10.0, 20.0, 5.0]),
+            ]),
+            &[],
+        );
 
         assert_eq!(plan.instances.len(), 1);
         assert_eq!(plan.instances[0].position, [10.0, 20.0, 5.0]);
@@ -546,7 +722,7 @@ mod tests {
 
     #[test]
     fn drops_a_real_interior() {
-        let plan = WorldPlan::new(world(vec![instance(1, "road", 4, [10.0, 20.0, 5.0])]));
+        let plan = WorldPlan::new(world(vec![instance(1, "road", 4, [10.0, 20.0, 5.0])]), &[]);
 
         assert_eq!(plan.instances.len(), 0);
         assert_eq!(plan.dropped_interior, 1);
@@ -557,7 +733,7 @@ mod tests {
         let mut instance = instance(1, "road", 0, [0.0; 3]);
         instance.rotation = [0.0, 0.0, 0.707_106_77, 0.707_106_77];
 
-        let plan = WorldPlan::new(world(vec![instance]));
+        let plan = WorldPlan::new(world(vec![instance]), &[]);
 
         assert_eq!(plan.instances[0].rotation[2], -0.707_106_77);
         assert_eq!(plan.instances[0].rotation[3], 0.707_106_77);

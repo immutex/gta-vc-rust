@@ -57,7 +57,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut streamer = Streamer::open(archive);
     let _ = streamer.warm_textures();
 
-    let plan = WorldPlan::new(world::load(&root.path().join("data/maps"))?);
+    let (world, effects) = world::load(&root.path().join("data/maps"))?;
+    let plan = WorldPlan::new(world, &effects);
     let sky = Sky::load(&root.path().join("data/timecyc.dat"), hour)?;
     let colliders = Colliders::load(streamer.archive());
     let start = plan.start(cell_x.zip(cell_y).map(|(x, y)| vc_world::CellKey { x, y }));

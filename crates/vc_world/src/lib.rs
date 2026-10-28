@@ -255,6 +255,12 @@ pub struct Effect {
     pub offset: [f32; 3],
     /// Direction vector some effect types carry, in the model's own space.
     pub direction: Option<[f32; 3]>,
+    /// Effect type. `255` and `0` are the authored lights over the roads.
+    pub kind: u32,
+    /// Authored colour, red first.
+    pub colour: [u8; 3],
+    /// Authored radius or size, in world units.
+    pub size: f32,
 }
 
 /// Parses the `2dfx` sections of an IDE file.
@@ -315,6 +321,16 @@ pub fn parse_effects(text: &str) -> Result<Vec<Effect>, WorldError> {
             None
         };
 
+        let colour = if fields.len() >= 8 {
+            [
+                number::<u8>(fields[5], 5).unwrap_or(255),
+                number::<u8>(fields[6], 6).unwrap_or(255),
+                number::<u8>(fields[7], 7).unwrap_or(255),
+            ]
+        } else {
+            [255; 3]
+        };
+
         effects.push(Effect {
             definition_id: number::<u32>(fields[0], 0)?,
             offset: [
@@ -323,6 +339,12 @@ pub fn parse_effects(text: &str) -> Result<Vec<Effect>, WorldError> {
                 number::<f32>(fields[3], 3)?,
             ],
             direction,
+            kind: number::<u32>(fields[4], 4).unwrap_or(0),
+            colour,
+            size: fields
+                .get(11)
+                .and_then(|value| value.parse::<f32>().ok())
+                .unwrap_or(12.0),
         });
     }
 
