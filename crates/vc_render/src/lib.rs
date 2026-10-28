@@ -58,6 +58,11 @@ impl Material for VcMaterial {
         SHADER_PATH.into()
     }
 
+    fn alpha_mode(&self) -> AlphaMode {
+        // Foliage, fences and railings are cut-outs in Vice City, not blended surfaces.
+        AlphaMode::Mask(0.5)
+    }
+
     fn specialize(
         _pipeline: &MaterialPipeline,
         descriptor: &mut RenderPipelineDescriptor,
@@ -83,7 +88,8 @@ pub struct VcRenderPlugin;
 
 impl Plugin for VcRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<VcMaterial>::default());
+        app.add_plugins(MaterialPlugin::<VcMaterial>::default())
+            .init_resource::<TextureCache>();
     }
 }
 

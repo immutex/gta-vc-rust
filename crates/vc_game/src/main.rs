@@ -74,21 +74,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     App::new()
-        .add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "vc-rs — streaming Vice City".to_owned(),
-                        ..default()
-                    }),
-                    ..default()
-                })
-                // Shaders live with the crate; the runtime cooks everything else in memory.
-                .set(AssetPlugin {
-                    file_path: "crates/vc_game/assets".to_owned(),
-                    ..default()
-                }),
-        )
+        // The default asset root is `assets` next to the crate, which is where the
+        // shader lives; overriding it doubles the path because Bevy already anchors
+        // the root to the crate's manifest directory in a cargo build.
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "vc-rs — streaming Vice City".to_owned(),
+                ..default()
+            }),
+            ..default()
+        }))
         .add_plugins(VcRenderPlugin)
         .insert_resource(ClearColor(Color::srgb(0.42, 0.56, 0.70)))
         .insert_resource(Stream {
