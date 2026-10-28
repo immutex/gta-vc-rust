@@ -8,6 +8,7 @@
 mod census;
 mod cook;
 mod dump;
+mod facing;
 mod formats;
 mod models;
 mod physics;
@@ -47,12 +48,13 @@ enum Cmd {
         /// Cell y index.
         y: i32,
     },
+    /// Decide the instance rotation convention from lamp arms and the road graph.
+    Facing,
     /// Cross-check a cell's placements against the map's collision data.
     Verify {
-        /// Cell x index.
-        x: i32,
-        /// Cell y index.
-        y: i32,
+        /// Restrict to one cell, as x y.
+        #[arg(long, num_args = 2)]
+        cell: Option<Vec<i32>>,
     },
     /// Report the texture format families the install uses.
     Formats {
@@ -102,7 +104,11 @@ fn main() -> Result<()> {
         Cmd::Physics { radius } => physics::run(radius),
         Cmd::Formats { name } => formats::run(name.as_deref()),
         Cmd::Models { x, y } => models::run(x, y),
-        Cmd::Verify { x, y } => verify::run(x, y),
+        Cmd::Verify { cell } => verify::run(cell.and_then(|values| match values.as_slice() {
+            [x, y] => Some((*x, *y)),
+            _ => None,
+        })),
+        Cmd::Facing => facing::run(),
         Cmd::Dump { target, depth } => dump::run(&target, depth),
     }
 }

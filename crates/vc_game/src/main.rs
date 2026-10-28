@@ -148,11 +148,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .insert_resource(Spawn(centre))
         .insert_resource(collision)
         .insert_resource(WorldLighting(lighting))
+        .insert_resource(RotationMode::default())
         .add_systems(Startup, (setup_scene, spawn_hud))
         .add_systems(Update, update_hud)
         .add_systems(
             Update,
-            (look, fly_camera, walk_player, stream_cells, report).chain(),
+            (look, fly_camera, walk_player, rebuild, stream_cells, report).chain(),
         )
         .run();
 
@@ -162,6 +163,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 /// Collision models, wrapped so the streaming crate stays free of Bevy types.
 #[derive(Resource)]
 struct CollisionSet(Colliders);
+
+/// Which sense instance rotations are applied in.
+///
+/// A quaternion and its conjugate describe the same rotation in opposite hands. The
+/// data cannot say which the game meant, so this is a switch: press R and the world
+/// respawns under the other convention, which settles it in one look.
+#[derive(Resource, Default)]
+struct RotationMode {
+    flipped: bool,
+}
 
 /// Marks the diagnostics text so only it is rewritten each frame.
 #[derive(Component)]
@@ -204,6 +215,8 @@ struct FlyCam {
     pitch: f32,
     /// False while the player is walking; the fly camera then leaves the view alone.
     walking: bool,
+    /// Whether instance rotations are applied conjugated. See [`RotationMode`].
+    flipped: bool,
 }
 
 impl FlyCam {
@@ -217,6 +230,7 @@ impl FlyCam {
             yaw: f32::atan2(-direction.x, -direction.z),
             pitch: f32::atan2(direction.y, horizontal),
             walking: false,
+            flipped: false,
         }
     }
 }
@@ -247,6 +261,18 @@ fn look(
     mut motion: MessageReader<'_, '_, MouseMotion>,
     mut state: ResMut<'_, FlyCam>,
 ) {
+    if keys.just_pressed(KeyCode::KeyR) {
+        state.flipped = !state.flipped;
+        println!(
+            "rotation sense: {}",
+            if state.flipped {
+                "conjugate"
+            } else {
+                "as stored"
+            }
+        );
+    }
+
     if keys.just_pressed(KeyCode::KeyF) {
         state.walking = !state.walking;
         println!("mode: {}", if state.walking { "walk" } else { "fly" });
@@ -349,6 +375,44 @@ fn prepare(world: World) -> (World, HashMap<u32, ObjectDefinition>) {
     )
 }
 
+/// Rebuilds the world when the rotation sense changes.
+///
+/// Every mesh hangs off the world root, so despawning the root's children plus
+/// forgetting which cells are loaded is enough: the streamer re-spawns them next frame
+/// with the other convention, and the cooked models stay cached.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are taken by value by design"
+)]
+fn rebuild(
+    mut commands: Commands<'_, '_>,
+    mode: Res<'_, RotationMode>,
+    mut seen: Local<'_, bool>,
+    mut stream: ResMut<'_, Stream>,
+    root: Res<'_, WorldRoot>,
+    children: Query<'_, '_, &ChildOf>,
+) {
+    if *seen == mode.flipped {
+        return;
+    }
+
+    *seen = mode.flipped;
+
+    if !stream.loaded.is_empty() || !stream.cursors.is_empty() {
+        for child in &children {
+            if child.parent() == root.0 {
+                commands.entity(child.parent()).despawn();
+            }
+        }
+
+        stream.loaded.clear();
+        stream.cursors.clear();
+        stream.spawned = 0;
+        stream.physics = StaticWorld::new(25.0);
+        stream.colliders.clear();
+    }
+}
+
 /// Registers collision for one placed instance, if the install models it.
 ///
 /// One collider per model, referenced by every instance of it, so the city's
@@ -401,6 +465,7 @@ fn stream_cells(
     root: Res<'_, WorldRoot>,
     colliders: Res<'_, CollisionSet>,
     lighting: Res<'_, WorldLighting>,
+    mode: Res<'_, RotationMode>,
 ) {
     let Ok(transform) = camera.single() else {
         return;
@@ -480,13 +545,24 @@ fn stream_cells(
 
             // Straight from the map, in the game's own axes; the world root handles
             // the handed-up conversion for every mesh at once.
-            let placed = Transform::from_translation(Vec3::from(instance.position))
-                .with_rotation(Quat::from_xyzw(
+            let flipped = mode.flipped;
+            let rotation = if flipped {
+                Quat::from_xyzw(
+                    -instance.rotation[0],
+                    -instance.rotation[1],
+                    -instance.rotation[2],
+                    instance.rotation[3],
+                )
+            } else {
+                Quat::from_xyzw(
                     instance.rotation[0],
                     instance.rotation[1],
                     instance.rotation[2],
                     instance.rotation[3],
-                ))
+                )
+            };
+            let placed = Transform::from_translation(Vec3::from(instance.position))
+                .with_rotation(rotation)
                 .with_scale(Vec3::from(instance.scale));
 
             for part in &parts {
