@@ -4485,6 +4485,7 @@ dependencies = [
  "vc_cook",
  "vc_render",
  "vc_stream",
+ "vc_timecyc",
  "vc_transport",
  "vc_world",
 ]

@@ -14,13 +14,14 @@ use std::path::{Path, PathBuf};
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::input::mouse::MouseMotion;
-use bevy::pbr::MeshMaterial3d;
+use bevy::pbr::{DistanceFog, FogFalloff, MeshMaterial3d};
 use bevy::prelude::*;
 use vc_render::{
     ModelPart, TextureCache, VcMaterial, VcRenderPlugin, to_bevy_position, to_bevy_rotation,
     upload_model,
 };
 use vc_stream::Streamer;
+use vc_timecyc::Timecycle;
 use vc_transport::{GameRoot, ImageArchive};
 use vc_world::{CELL_SIZE, CellGrid, CellKey, ObjectDefinition, World};
 
@@ -74,6 +75,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         grid.instances(start).len()
     );
 
+    let sky = load_sky(&root.path().join("data/timecyc.dat"))?;
+
+    println!(
+        "sky: {} at {}h, far clip {:.0}, fog from {:.0}",
+        sky.weather, sky.hour, sky.far_clip, sky.fog_start
+    );
+
     App::new()
         // The default asset root is `assets` next to the crate, which is where the
         // shader lives; overriding it doubles the path because Bevy already anchors
@@ -86,7 +94,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             ..default()
         }))
         .add_plugins(VcRenderPlugin)
-        .insert_resource(ClearColor(Color::srgb(0.42, 0.56, 0.70)))
+        .insert_resource(ClearColor(sky.clear))
         .insert_resource(Stream {
             streamer: warmed(archive),
             definitions,
@@ -106,6 +114,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Camera3d::default(),
                 // Vice City had no HDR pipeline: the texture colour is the colour.
                 Tonemapping::None,
+                DistanceFog {
+                    color: sky.clear,
+                    falloff: FogFalloff::Linear {
+                        start: sky.fog_start,
+                        end: sky.far_clip,
+                    },
+                    ..default()
+                },
                 Transform::from_translation(
                     to_bevy_position(centre) + Vec3::new(-120.0, 55.0, 0.0),
                 )
@@ -319,6 +335,42 @@ fn report(time: Res<'_, Time>, stream: Res<'_, Stream>, mut last: Local<'_, f32>
         stats.dictionaries,
         stream.failed
     );
+}
+
+/// The sky and fog for one hour of one weather type.
+struct Sky {
+    weather: String,
+    hour: usize,
+    clear: Color,
+    fog_start: f32,
+    far_clip: f32,
+}
+
+fn load_sky(path: &Path) -> Result<Sky, Box<dyn Error>> {
+    let text = String::from_utf8_lossy(&fs::read(path)?).into_owned();
+    let table = Timecycle::parse(&text)?;
+    let weather = table
+        .weathers
+        .first()
+        .ok_or("timecyc.dat holds no weather types")?;
+    let hour_index = 12;
+    let hour = weather
+        .hours
+        .get(hour_index)
+        .ok_or("timecyc.dat is missing noon")?;
+
+    Ok(Sky {
+        weather: weather.name.clone(),
+        hour: hour_index,
+        clear: linear_to_color(hour.sky_bottom),
+        fog_start: hour.fog_start,
+        far_clip: hour.far_clip,
+    })
+}
+
+/// Timecyc colours are already linear, which is what Bevy's fog wants.
+const fn linear_to_color(rgb: [f32; 3]) -> Color {
+    Color::LinearRgba(LinearRgba::new(rgb[0], rgb[1], rgb[2], 1.0))
 }
 
 fn warmed(archive: ImageArchive) -> Streamer {
