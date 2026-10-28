@@ -152,6 +152,9 @@ impl WorldPlan {
         // Vice City bakes its shadows as black quads. If they are drawing opaque they
         // cover whole streets, so dropping them by name is how that gets tested.
         let drop_shadow_quads = std::env::var_os("VC_NO_SHADOW_MODELS").is_some();
+        // Diagnostic: keep only ground-type models, so a floor that renders vertical can be
+        // looked at on its own instead of through a city.
+        let only_ground = std::env::var_os("VC_ONLY_GROUND").is_some();
         let mut instances = Vec::with_capacity(world.instances.len());
         let (mut dropped_lod, mut dropped_interior, mut dropped_unknown) = (0, 0, 0);
 
@@ -164,6 +167,17 @@ impl WorldPlan {
 
             if drop_shadow_quads && definition.model.to_ascii_lowercase().contains("shad") {
                 continue;
+            }
+
+            if only_ground {
+                let name = definition.model.to_ascii_lowercase();
+                let is_ground = ["land", "road", "pave", "islandlod", "lae", "lan"]
+                    .iter()
+                    .any(|needle| name.contains(needle));
+
+                if !is_ground {
+                    continue;
+                }
             }
 
             if keep_all {
