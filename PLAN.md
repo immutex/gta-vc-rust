@@ -487,6 +487,30 @@ This is what the prelit shade floor (§4.26) was standing in for. The floor stay
 daylight case, where the original's baked sun is the only light and a quarter of the
 vertices are still near black because a dynamic light would have been added at runtime.
 
+### 4.29 "The textures are sideways": five stages verified, one not
+
+Reported repeatedly and chased wrongly four times. The corrections are worth recording as
+much as the finding: the instance rotation sense was measured (lamp arms, cos 0.92 against
+0.13), the road graph was measured, the LOD shells were cross-referenced, and the camera
+basis was printed. Every one of those was either inconclusive or irrelevant to what the eye
+saw, and each cost a rebuild.
+
+What the data does say, each now covered by a check rather than an argument:
+
+| Stage | Check | Verdict |
+|---|---|---|
+| TXD decode | `cargo xtask texture pizzaboy8bit128 out.png` | coherent character atlas |
+| DFF texture coordinates | `cargo xtask uvs <model>` - `v` must track height | v tracks height on `jewler_shop`, `nbt_hotel06balcony`, `nbecland09` |
+| Bake | test: a quad with u↔x, v↔z must survive `Batcher` | passes |
+| Camera | startup log prints the basis | right (0,0,1), up (0.417,0.909,0), back (-0.909,0.417,0): zero roll |
+| Mip chain | test: a black quadrant must stay in its corner, RGBA8 and BC1 | passes |
+
+The remaining stage is the frame, which no statistic over the files can inspect. The
+offscreen capture exists for that: `cargo run -p vc_game --example shot`. It had three
+faults of its own before it worked - a duplicate `Msaa` panic, an HDR camera rendering into
+an LDR target (a faithful black PNG), and silence about both - and now reads its own output
+back and reports the mean brightness.
+
 ### 4.26 Modern lighting and draw budget
 
 The resident renderer lights the map physically: a directional sun from `timecyc` with two shadow
