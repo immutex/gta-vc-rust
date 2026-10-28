@@ -14,6 +14,8 @@ mod formats;
 mod models;
 mod physics;
 mod stream;
+mod texture;
+mod uvs;
 mod verify;
 mod worlds;
 
@@ -34,6 +36,18 @@ struct Cli {
 enum Cmd {
     /// Format, lint, test and check licences.
     Check,
+    /// Report how a model's UVs line up with its geometry.
+    Uvs {
+        /// Model name, as the IDE files spell it.
+        model: String,
+    },
+    /// Decode one texture from the install to a PNG.
+    Texture {
+        /// Texture name inside any dictionary.
+        name: String,
+        /// Destination PNG path.
+        out: PathBuf,
+    },
     /// Summarise the game installation, and optionally verify it.
     Census {
         /// Fail when the install does not match the totals in PLAN.md.
@@ -109,6 +123,8 @@ fn main() -> Result<()> {
         Cmd::Census { verify, verbose } => census::run(verify, verbose),
         Cmd::Cook { model, txds, out } => cook::run(&model, &txds, out.as_deref()),
         Cmd::Stream { radius } => stream::run(radius),
+        Cmd::Texture { name, out } => texture::run(&name, &out),
+        Cmd::Uvs { model } => uvs::run(&model),
         Cmd::Physics { radius } => physics::run(radius),
         Cmd::Formats { name } => formats::run(name.as_deref()),
         Cmd::Models { x, y } => models::run(x, y),

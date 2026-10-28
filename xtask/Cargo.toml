@@ -12,6 +12,7 @@ anyhow.workspace = true
 blake3.workspace = true
 clap = { workspace = true, features = ["derive"] }
 
+png.workspace = true
 rw_stream.workspace = true
 vc_col.workspace = true
 vc_cook.workspace = true

@@ -5226,6 +5226,7 @@ dependencies = [
  "anyhow",
  "blake3",
  "clap",
+ "png",
  "rw_stream",
  "vc_col",
  "vc_cook",
