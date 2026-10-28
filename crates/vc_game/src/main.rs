@@ -45,12 +45,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     let sky = Sky::load(&root.path().join("data/timecyc.dat"), options.hour)?;
-    // Cells differ a lot in what they show - much of this map is shoreline and canal, so
-    // several of the busiest ones open over water. Pass a cell to pick another; the overlay
-    // reports which one you are in.
-    if options.cell.is_none() {
-        println!("no cell given: pass one as `-- <x> <y>`; the overlay shows the current cell");
-    }
     println!(
         "sky: {} at {}h, fog {:.0}..{:.0}, sun power {:.2}",
         sky.weather, sky.hour, sky.fog_start, sky.fog_end, sky.power
@@ -209,7 +203,13 @@ impl Options {
             .min(23);
 
         Self {
-            cell: x.zip(y).map(|(x, y)| CellKey { x, y }),
+            // Cell (1, 1) is where the opening shot was framed and checked: a street with
+            // buildings, palms and water beyond. The busiest cell, which is what this used
+            // to fall back on, is open sea - the game opened looking at nothing.
+            cell: Some(
+                x.zip(y)
+                    .map_or(CellKey { x: 1, y: 1 }, |(x, y)| CellKey { x, y }),
+            ),
             hour,
         }
     }
