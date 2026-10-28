@@ -511,6 +511,36 @@ faults of its own before it worked - a duplicate `Msaa` panic, an HDR camera ren
 an LDR target (a faithful black PNG), and silence about both - and now reads its own output
 back and reports the mean brightness.
 
+### 4.30 What actually made the city unreadable: two lighting faults
+
+"Everything is sideways" was reported for weeks and chased as a rotation five times. It was
+never a rotation. What it was, found by rendering and bisecting with switches:
+
+| Test | Frame mean | Conclusion |
+|---|---|---|
+| base | 40.1 | |
+| every texture replaced by flat grey | 40.2 | not a dark image |
+| shadow maps disabled | 40.5 | not the shadows at a distance |
+| shadow-quad models dropped | 40.2 | not Vice City's baked shadow polygons |
+| prelit floor 0.06 -> 0.38 | 41.8 | not the baked shade's floor |
+| **ambient fill 600 -> 4000** | **52.1, min pixel 0 -> 11** | **found it** |
+| world made `NotShadowCaster` | beach 9.4 -> **29.3** | **and a second one** |
+
+Two faults, not one. Surfaces facing away from the sun are lit by the ambient term alone,
+and 600 was far too weak; and the whole prelit world was receiving real-time shadows from a
+sun it had already been shaded against, which cost a second pass over every visible chunk
+as well as darkening it.
+
+**Methods worth keeping.** WSL has lavapipe, so `cargo run --example shot` renders a frame
+here and it can be looked at directly - the whole investigation took minutes once that
+worked, after days of guessing. `VC_AMBIENT`, `VC_NO_SHADOWS`, `VC_NO_TEXTURES`,
+`VC_NO_SHADOW_MODELS`, `VC_KEEP_ALL`, `VC_SHOT_EYE` and `VC_SHOT_TARGET` make each
+hypothesis a render rather than a rebuild.
+
+**A trap in the instrument itself.** The capture did not spawn the ocean, so sea rendered as
+clear colour, and at a shoreline cell that is indistinguishable from missing ground. Three
+readings of "the terrain is missing" came from that. The capture draws water now.
+
 ### 4.26 Modern lighting and draw budget
 
 The resident renderer lights the map physically: a directional sun from `timecyc` with two shadow
