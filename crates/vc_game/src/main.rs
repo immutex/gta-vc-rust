@@ -415,7 +415,7 @@ fn rebuild(
     mut seen: Local<'_, bool>,
     mut stream: ResMut<'_, Stream>,
     root: Res<'_, WorldRoot>,
-    children: Query<'_, '_, &ChildOf>,
+    children: Query<'_, '_, (Entity, &ChildOf)>,
 ) {
     if *seen == mode.flipped {
         return;
@@ -424,9 +424,9 @@ fn rebuild(
     *seen = mode.flipped;
 
     if !stream.loaded.is_empty() || !stream.cursors.is_empty() {
-        for child in &children {
+        for (entity, child) in &children {
             if child.parent() == root.0 {
-                commands.entity(child.parent()).despawn();
+                commands.entity(entity).despawn();
             }
         }
 

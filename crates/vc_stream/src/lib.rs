@@ -215,13 +215,17 @@ impl Streamer {
 
     /// Fetches one texture by dictionary and name, for callers outside model cooking.
     pub fn texture(&mut self, txd: &str, name: &str) -> Option<Arc<CookedTexture>> {
-        let dictionary = self.dictionary(txd)?;
         let key = name.to_ascii_lowercase();
 
-        dictionary
-            .get(&key)
-            .cloned()
-            .or_else(|| self.global.get(&key).cloned())
+        // A dictionary that does not parse must not hide a texture the index already
+        // knows about, so the hint is tried first and then simply skipped.
+        if let Some(dictionary) = self.dictionary(txd)
+            && let Some(found) = dictionary.get(&key)
+        {
+            return Some(Arc::clone(found));
+        }
+
+        self.global.get(&key).cloned()
     }
 
     /// Resolves a material's texture name.

@@ -192,6 +192,208 @@ pub(crate) fn run() -> Result<()> {
         println!("  (1.0 means every shadow points the same way in the world)");
     }
 
+    // Lamps only, and using the game's own arm direction: the 2dfx offset *is* where
+    // the head is, so its horizontal part points along the arm. An arm reaches over the
+    // kerb, so the arm rotated into the world should point at the nearest road point.
+    let mut lamp_stored = (0.0f64, 0u32, 0u32);
+    let mut lamp_conjugated = (0.0f64, 0u32, 0u32);
+
+    for instance in &world.instances {
+        let Some(definition) = definitions.get(&instance.definition_id) else {
+            continue;
+        };
+        if !definition.model.to_ascii_lowercase().contains("lamp") {
+            continue;
+        }
+        let Some(offsets) = effects.get(&instance.definition_id) else {
+            continue;
+        };
+        let Some((nearest, _)) = nearest_on_segments(&segments, instance.position) else {
+            continue;
+        };
+
+        let to_road = [
+            nearest[0] - instance.position[0],
+            nearest[1] - instance.position[1],
+        ];
+
+        for offset in offsets {
+            let arm = [offset[0], offset[1]];
+            let length = arm[0].hypot(arm[1]);
+
+            if length < 0.4 {
+                continue;
+            }
+
+            for (conjugate, bucket) in [(false, &mut lamp_stored), (true, &mut lamp_conjugated)] {
+                let flipped = if conjugate {
+                    [
+                        -instance.rotation[0],
+                        -instance.rotation[1],
+                        -instance.rotation[2],
+                        instance.rotation[3],
+                    ]
+                } else {
+                    instance.rotation
+                };
+                let world = rotate([offset[0], offset[1], 0.0], flipped);
+                let arm_world = [world[0], world[1]];
+                let arm_length = arm_world[0].hypot(arm_world[1]);
+
+                if arm_length < 1e-3 {
+                    continue;
+                }
+
+                let dot = (arm_world[0] * to_road[0] + arm_world[1] * to_road[1])
+                    / (arm_length * to_road[0].hypot(to_road[1]).max(1e-3));
+
+                bucket.0 += f64::from(dot);
+                bucket.1 += 1;
+                if dot > 0.0 {
+                    bucket.2 += 1;
+                }
+            }
+        }
+    }
+
+    if lamp_stored.1 > 0 {
+        println!(
+            "lamps only: {:.1}% of arms point at the road as stored, {:.1}% conjugated",
+            100.0 * f64::from(lamp_stored.2) / f64::from(lamp_stored.1),
+            100.0 * f64::from(lamp_conjugated.2) / f64::from(lamp_conjugated.1)
+        );
+
+        // If the arms were rotated correctly they would all sit near 0 degrees. A peak
+        // at 90 means a quarter turn is missing somewhere; a peak at 180 means the
+        // model's forward axis is reversed.
+        let mut buckets = [0u32; 6];
+
+        for instance in &world.instances {
+            let Some(definition) = definitions.get(&instance.definition_id) else {
+                continue;
+            };
+            if !definition.model.to_ascii_lowercase().contains("lamp") {
+                continue;
+            }
+            let Some(offsets) = effects.get(&instance.definition_id) else {
+                continue;
+            };
+            let Some((nearest, _)) = nearest_on_segments(&segments, instance.position) else {
+                continue;
+            };
+
+            let to_road = [
+                nearest[0] - instance.position[0],
+                nearest[1] - instance.position[1],
+            ];
+            let road_length = to_road[0].hypot(to_road[1]);
+
+            if road_length < 1e-3 {
+                continue;
+            }
+
+            for offset in offsets {
+                let world = rotate([offset[0], offset[1], 0.0], instance.rotation);
+                let arm_length = world[0].hypot(world[1]);
+
+                if arm_length < 1e-3 {
+                    continue;
+                }
+
+                let cos = ((world[0] * to_road[0] + world[1] * to_road[1])
+                    / (arm_length * road_length))
+                    .clamp(-1.0, 1.0);
+                let angle = cos.acos().to_degrees();
+                let bucket = ((angle / 30.0) as usize).min(5);
+                buckets[bucket] += 1;
+            }
+        }
+
+        println!("arm angle to the road, as stored (every arm counted):");
+        for (index, count) in buckets.iter().enumerate() {
+            println!("  {:>3}-{:>3} deg: {count}", index * 30, index * 30 + 30);
+        }
+
+        // Multi-arm models carry an arm on each side, so the meaningful question is
+        // whether *some* arm reaches the road. Best-of-per-instance removes that
+        // ambiguity, which is what made the histogram bimodal.
+        let mut best_stored = (0u32, 0u32);
+        let mut best_conjugated = (0u32, 0u32);
+
+        for instance in &world.instances {
+            let Some(definition) = definitions.get(&instance.definition_id) else {
+                continue;
+            };
+            if !definition.model.to_ascii_lowercase().contains("lamp") {
+                continue;
+            }
+            let Some(offsets) = effects.get(&instance.definition_id) else {
+                continue;
+            };
+            let Some((nearest, _)) = nearest_on_segments(&segments, instance.position) else {
+                continue;
+            };
+
+            let to_road = [
+                nearest[0] - instance.position[0],
+                nearest[1] - instance.position[1],
+            ];
+            let road_length = to_road[0].hypot(to_road[1]);
+
+            if road_length < 1e-3 {
+                continue;
+            }
+
+            let compare = |rotation: [f32; 4]| -> f32 {
+                let mut best = f32::NEG_INFINITY;
+
+                for offset in offsets {
+                    let world = rotate([offset[0], offset[1], 0.0], rotation);
+                    let arm_length = world[0].hypot(world[1]);
+
+                    if arm_length < 1e-3 {
+                        continue;
+                    }
+
+                    let cos = ((world[0] * to_road[0] + world[1] * to_road[1])
+                        / (arm_length * road_length))
+                        .clamp(-1.0, 1.0);
+
+                    best = best.max(cos);
+                }
+
+                best
+            };
+
+            let as_stored = compare(instance.rotation);
+            let flipped = compare([
+                -instance.rotation[0],
+                -instance.rotation[1],
+                -instance.rotation[2],
+                instance.rotation[3],
+            ]);
+            let threshold = std::f32::consts::FRAC_1_SQRT_2;
+
+            best_stored.1 += 1;
+            best_conjugated.1 += 1;
+
+            if as_stored > threshold {
+                best_stored.0 += 1;
+            }
+            if flipped > threshold {
+                best_conjugated.0 += 1;
+            }
+        }
+
+        if best_stored.1 > 0 {
+            println!(
+                "best arm within 45 degrees of the road: stored {:.1}%, conjugated {:.1}%",
+                100.0 * f32::from(best_stored.0 as u16) / best_stored.1 as f32,
+                100.0 * f32::from(best_conjugated.0 as u16) / best_conjugated.1 as f32
+            );
+        }
+    }
+
     println!("effect anchors measured: {} across the map", stored.1);
 
     if stored.1 > 0 {
@@ -232,6 +434,35 @@ fn unit(v: [f32; 3]) -> [f32; 3] {
 
 fn magnitude(v: [f64; 3]) -> f64 {
     (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+}
+
+/// Nearest point on the road network, and its distance.
+fn nearest_on_segments(
+    segments: &[([f32; 3], [f32; 3])],
+    point: [f32; 3],
+) -> Option<([f32; 3], f32)> {
+    let mut best: Option<([f32; 3], f32)> = None;
+
+    for (start, end) in segments {
+        let dx = end[0] - start[0];
+        let dy = end[1] - start[1];
+        let length = dx.mul_add(dx, dy * dy);
+
+        let t = if length < 1e-6 {
+            0.0
+        } else {
+            (((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length).clamp(0.0, 1.0)
+        };
+
+        let nearest = [dx.mul_add(t, start[0]), dy.mul_add(t, start[1]), start[2]];
+        let distance = (point[0] - nearest[0]).hypot(point[1] - nearest[1]);
+
+        if best.is_none_or(|(_, found)| distance < found) {
+            best = Some((nearest, distance));
+        }
+    }
+
+    best
 }
 
 /// Horizontal distance from `point` to the nearest road segment.
