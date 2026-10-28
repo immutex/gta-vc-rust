@@ -33,10 +33,12 @@ pub const ANISOTROPY: u16 = 8;
 
 /// Lowest linear value a prelit colour may keep.
 ///
-/// The original baked dynamic lighting into the prelit colours, and a quarter of the
-/// map's vertices are near black because a streetlight or headlight was doing the
-/// work. Without that light, black albedo would stay black under any sun.
-pub const PRELIT_FLOOR: f32 = 0.06;
+/// A quarter of the map's vertices are near black because the original lit them with
+/// dynamic lights - streetlights, headlights - that we do not have yet. Albedo of zero
+/// stays black under any sun, which is what the black patches on the roads are, so the
+/// floor stands in for that missing light. Raising it costs contrast in the darkest
+/// areas and buys a readable road.
+pub const PRELIT_FLOOR: f32 = 0.2;
 
 /// Converts a position from the game's Z-up axes to Bevy's Y-up axes.
 ///
