@@ -615,6 +615,7 @@ fn repair_normals(bucket: &mut Bucket) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::mesh::VertexAttributeValues;
 
     #[test]
     fn maps_game_axes_without_mirroring() {
@@ -628,6 +629,80 @@ mod tests {
 
         // East turned north: north is -Z in Bevy, and the city must not mirror.
         assert!((east - Vec3::new(0.0, 0.0, -1.0)).length() < 1e-5, "{east}");
+    }
+
+    /// A quad whose texture coordinates follow the geometry: `u` along x, `v` along z.
+    fn oriented_quad() -> vc_stream::CookedModel {
+        let corner = |position: [f32; 3], uv: [f32; 2]| vc_cook::SceneVertex {
+            position,
+            normal: [0.0, 0.0, 1.0],
+            uv: [uv, uv],
+            colour: [255; 4],
+        };
+
+        vc_stream::CookedModel {
+            meshes: vec![vc_stream::CookedMesh {
+                vertices: vec![
+                    corner([0.0, 0.0, 0.0], [0.0, 0.0]),
+                    corner([4.0, 0.0, 0.0], [1.0, 0.0]),
+                    corner([4.0, 0.0, 3.0], [1.0, 1.0]),
+                    corner([0.0, 0.0, 3.0], [0.0, 1.0]),
+                ],
+                groups: vec![vc_stream::MaterialGroup {
+                    colour: [1.0; 4],
+                    texture: None,
+                    indices: vec![0, 1, 2, 0, 2, 3],
+                }],
+            }],
+        }
+    }
+
+    #[test]
+    fn keeps_texture_coordinates_with_their_vertices() {
+        let mut meshes = Assets::<Mesh>::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let mut images = Assets::<Image>::default();
+        let mut textures = TextureCache::default();
+        textures.upload_batch(&[], &mut images);
+        let mut cache = MaterialCache::default();
+        let mut batcher = Batcher::default();
+
+        batcher.push(
+            &oriented_quad(),
+            &Placement::new([0.0; 3], [0.0, 0.0, 0.0, 1.0], [1.0; 3]),
+        );
+        let baked = batcher.finish(&mut meshes, &mut materials, &textures, &mut cache);
+        let mesh = meshes
+            .get(&baked.parts[0].mesh)
+            .unwrap_or_else(|| unreachable!("the bake emits a mesh"));
+        let Some(VertexAttributeValues::Float32x2(uvs)) = mesh.attribute(Mesh::ATTRIBUTE_UV_0)
+        else {
+            unreachable!("the mesh carries UVs")
+        };
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            unreachable!("the mesh carries positions")
+        };
+
+        // The two ends of the diagonal in x must differ in u and match in v.
+        for (uv, position) in uvs.iter().zip(positions) {
+            let expected_u = position[0] / 4.0;
+            let expected_v = position[2] / 3.0;
+
+            assert!(
+                (uv[0] - expected_u).abs() < 1e-4,
+                "u {} should follow x {}",
+                uv[0],
+                position[0]
+            );
+            assert!(
+                (uv[1] - expected_v).abs() < 1e-4,
+                "v {} should follow z {}",
+                uv[1],
+                position[2]
+            );
+        }
     }
 
     fn two_triangles() -> vc_stream::CookedModel {
