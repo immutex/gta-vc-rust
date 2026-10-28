@@ -76,6 +76,31 @@ pub struct WorldPlan {
     pub lights: Vec<LightPoint>,
 }
 
+impl WorldPlan {
+    /// The closest placement to a game-space point, and its distance.
+    #[must_use]
+    pub fn nearest_to(&self, point: [f32; 3]) -> Option<(String, f32)> {
+        let mut best: Option<(String, f32)> = None;
+
+        for instance in &self.instances {
+            let dx = instance.position[0] - point[0];
+            let dy = instance.position[1] - point[1];
+            let dz = instance.position[2] - point[2];
+            let distance = dx.mul_add(dx, dy.mul_add(dy, dz * dz)).sqrt();
+
+            if best.as_ref().is_none_or(|(_, found)| distance < *found) {
+                let name = self
+                    .definitions
+                    .get(&instance.definition_id)
+                    .map_or_else(|| "?".to_owned(), |definition| definition.model.clone());
+                best = Some((name, distance));
+            }
+        }
+
+        best
+    }
+}
+
 /// One authored light: where it is, what colour it is, how far it reaches.
 #[derive(Debug, Clone, Copy)]
 pub struct LightPoint {
@@ -275,7 +300,7 @@ fn corrected(instance: &Instance, sense: Sense) -> Instance {
 /// The data does not settle it: the lamp-arm test prefers [`Sense::Conjugated`] by a
 /// wide margin, yet the wrapped geometry of signs and shop fronts reads better to the
 /// eye under the other. It is a switch so a person can decide in one keypress.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Resource)]
 pub enum Sense {
     /// Apply the quaternion as authored.
     ///

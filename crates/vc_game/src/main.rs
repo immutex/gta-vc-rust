@@ -84,7 +84,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .init_resource::<Stats>()
         .init_resource::<world::ActiveLights>()
         .insert_resource(RawWorld(world))
-        .insert_resource(Sense(sense))
+        .insert_resource(sense)
         .insert_resource(Effects(effects))
         .add_systems(
             Startup,
@@ -119,7 +119,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn flip_sense(
     mut commands: Commands<'_, '_>,
     keys: Res<'_, ButtonInput<KeyCode>>,
-    mut sense: ResMut<'_, Sense>,
+    mut sense: ResMut<'_, world::Sense>,
     raw: Res<'_, RawWorld>,
     effects: Res<'_, Effects>,
     mut plan: ResMut<'_, WorldPlan>,
@@ -138,14 +138,14 @@ fn flip_sense(
         return;
     }
 
-    sense.0 = sense.0.flipped();
-    println!("rotation sense: {} (rebuilding)", sense.0.label());
+    *sense = sense.flipped();
+    println!("rotation sense: {} (rebuilding)", sense.label());
 
     for entity in &parts {
         commands.entity(entity).despawn();
     }
 
-    *plan = WorldPlan::new(raw.0.clone(), &effects.0, sense.0);
+    *plan = WorldPlan::new(raw.0.clone(), &effects.0, *sense);
     *physics = Physics(vc_physics::StaticWorld::new(world::PHYSICS_BUCKET));
 
     let baked = world::bake(
@@ -185,10 +185,6 @@ struct ColliderSet(Colliders);
 /// The `2dfx` effects, kept for the same reason.
 #[derive(Resource)]
 struct Effects(Vec<vc_world::Effect>);
-
-/// The active rotation sense.
-#[derive(Resource, Clone, Copy)]
-struct Sense(world::Sense);
 
 /// Command-line start cell and hour.
 struct Options {

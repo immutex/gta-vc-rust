@@ -4,7 +4,7 @@ use bevy::diagnostic::{Diagnostic, DiagnosticsStore, FrameTimeDiagnosticsPlugin}
 use bevy::prelude::*;
 
 use crate::camera::FlyCamMarker;
-use crate::world::BakeStats;
+use crate::world::{BakeStats, Sense, WorldPlan};
 
 /// The baked scene's counters, shared with the overlay.
 #[derive(Resource, Default, Clone)]
@@ -36,13 +36,19 @@ pub fn spawn(mut commands: Commands<'_, '_>) {
 /// Rewrites the overlay once per frame.
 #[expect(
     clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by design"
+    clippy::too_many_arguments,
+    reason = "Bevy system parameters are taken by value by design, and each is a distinct resource"
 )]
 pub fn update(
     diagnostics: Res<'_, DiagnosticsStore>,
     stats: Res<'_, Stats>,
+    plan: Res<'_, WorldPlan>,
+    sense: Res<'_, Sense>,
     camera: Query<'_, '_, &Transform, With<FlyCamMarker>>,
     mut hud: Query<'_, '_, &mut Text, With<Hud>>,
+    mut nearest: Local<'_, (String, f32)>,
+    mut tick: Local<'_, f32>,
+    time: Res<'_, Time>,
 ) {
     let Ok(mut text) = hud.single_mut() else {
         return;
@@ -60,10 +66,20 @@ pub fn update(
         (at.x, -at.z, at.y)
     });
 
+    // Naming the nearest placement turns a screenshot into a model name, which is the
+    // difference between "something looks wrong" and a file to open.
+    if time.elapsed_secs() - *tick > 0.5 {
+        *tick = time.elapsed_secs();
+        *nearest = plan
+            .nearest_to([x, y, z])
+            .unwrap_or_else(|| ("none".to_owned(), 0.0));
+    }
+
     text.0 = format!(
-        "{:5.1} fps  {:5.2} ms\n{} chunks  {} draws  {} tris\n{} k verts  {} textures  {} failed\nat {:.0} {:.0} {:.0}",
+        "{:5.1} fps  {:5.2} ms  sense {}\n{} chunks  {} draws  {} tris\n{} k verts  {} textures  {} failed\nat {:.0} {:.0} {:.0}\nnear {} at {:.0} m",
         smoothed(&FrameTimeDiagnosticsPlugin::FPS),
         smoothed(&FrameTimeDiagnosticsPlugin::FRAME_TIME),
+        sense.label(),
         stats.0.chunks,
         stats.0.draws,
         stats.0.triangles,
@@ -73,5 +89,7 @@ pub fn update(
         x,
         y,
         z,
+        nearest.0,
+        nearest.1,
     );
 }
