@@ -162,11 +162,17 @@ impl TextureCache {
             let entry = self.uploaded.get(&key_of(texture));
 
             if entry.is_none()
+                && std::env::var_os("VC_TEXTURE_REPORT").is_some()
+                && collisions < 12
                 && self.uploaded.keys().any(|(other, width, height)| {
                     *other == name && (*width != texture.width || *height != texture.height)
                 })
             {
                 collisions += 1;
+                println!(
+                    "  {} {}x{} collides with another size",
+                    texture.name, texture.width, texture.height
+                );
             }
 
             let _ = self.uploaded.insert(key_of(texture), images.add(image));
