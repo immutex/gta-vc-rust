@@ -179,7 +179,9 @@ fn setup_camera(
     mut standard: ResMut<'_, Assets<StandardMaterial>>,
     mut meshes: ResMut<'_, Assets<Mesh>>,
 ) {
-    let mut image = Image::new_target_texture(800, 450, TextureFormat::Rgba8UnormSrgb, None);
+    // The camera is HDR, so its target has to be a float texture; an LDR target with an
+    // HDR view renders nothing at all, which is a black PNG rather than a warning.
+    let mut image = Image::new_target_texture(800, 450, TextureFormat::Rgba16Float, None);
     image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
     let handle = images.add(image);
     commands.insert_resource(Target(handle.clone()));
