@@ -141,6 +141,9 @@ impl WorldPlan {
             })
             .collect();
 
+        // Diagnostic: render every placement, including interiors and shells, so a filter
+        // can be ruled in or out by looking at the coverage.
+        let keep_all = std::env::var_os("VC_KEEP_ALL").is_some();
         let mut instances = Vec::with_capacity(world.instances.len());
         let (mut dropped_lod, mut dropped_interior, mut dropped_unknown) = (0, 0, 0);
 
@@ -151,15 +154,25 @@ impl WorldPlan {
                 continue;
             };
 
+            if keep_all {
+                instances.push(corrected(instance, sense));
+
+                continue;
+            }
+
             if is_lod(&definition.model) {
                 // A shell with no detail counterpart is the only copy of that object,
                 // so dropping it leaves a hole. The island shells are the exception:
                 // they are coarse stand-ins for whole blocks that are drawn in detail.
-                let orphan = !definition
+                // The island shells are the base terrain the whole city stands on, and
+                // they have detail nearby everywhere, so they are never redundant. A
+                // district shell is dropped when a detail copy sits on it.
+                let island = definition
                     .model
                     .to_ascii_lowercase()
-                    .starts_with("islandlod")
-                    && !detail
+                    .starts_with("islandlod");
+                let orphan = island
+                    || !detail
                         .iter()
                         .any(|detail| near(&detail.position, &instance.position));
 

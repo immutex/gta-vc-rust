@@ -17,7 +17,7 @@ use vc_game::camera::{FlyCam, Physics, Player};
 use vc_game::scene;
 use vc_game::sky::Sky;
 use vc_game::world::{self, WorldPlan};
-use vc_render::{MaterialCache, TextureCache, to_bevy_position};
+use vc_render::{MaterialCache, TextureCache};
 use vc_stream::{Colliders, Streamer};
 use vc_transport::{GameRoot, ImageArchive};
 
@@ -68,8 +68,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let sky = Sky::load(&root.path().join("data/timecyc.dat"), hour)?;
     let colliders = Colliders::load(streamer.archive());
     let start = plan.start(cell_x.zip(cell_y).map(|(x, y)| vc_world::CellKey { x, y }));
-    let target = to_bevy_position(start);
-    let eye = target + Vec3::new(-back, height, 0.0);
+    // Overridable so a capture can look straight down at the coverage instead of from
+    // the opening shot, without recompiling.
+    let centre = vc_render::to_bevy_position(start);
+    let eye = view("VC_SHOT_EYE").unwrap_or_else(|| centre + Vec3::new(-back, height, 0.0));
+    let target = view("VC_SHOT_TARGET").unwrap_or(centre);
 
     let mut app = App::new();
     app.add_plugins(
@@ -157,6 +160,14 @@ fn setup_world(
         println!("first part bounds: {:?}", part.bounds);
     }
     world::spawn(&mut commands, baked, sky.fog_end);
+}
+
+/// Reads a point from the environment, spelled `x,y,z`.
+fn view(name: &str) -> Option<Vec3> {
+    let text = std::env::var(name).ok()?;
+    let mut parts = text.split(',').map(|part| part.trim().parse::<f32>().ok());
+
+    Some(Vec3::new(parts.next()??, parts.next()??, parts.next()??))
 }
 
 /// Mean brightness and colour spread of a saved capture.
