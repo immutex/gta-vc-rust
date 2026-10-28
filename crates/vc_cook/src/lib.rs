@@ -13,7 +13,7 @@
 //!
 //! // A four-bit-per-pixel family maps straight through.
 //! assert_eq!(TextureFormat::for_block_bytes(Some(8)), TextureFormat::Bc1);
-//! assert_eq!(TextureFormat::for_block_bytes(Some(16)), TextureFormat::Bc3);
+//! assert_eq!(TextureFormat::for_block_bytes(Some(16)), TextureFormat::Bc2);
 //! ```
 
 #![cfg_attr(
@@ -169,8 +169,8 @@ pub const PALETTE_ENTRIES: usize = PALETTE_BYTES / 4;
 pub enum TextureFormat {
     /// DXT1 / BC1, four bits per pixel.
     Bc1,
-    /// DXT5 / BC3, eight bits per pixel with interpolated alpha.
-    Bc3,
+    /// DXT3 / BC2, eight bits per pixel with explicit 4-bit alpha.
+    Bc2,
     /// Uncompressed, for rasters the GPU cannot take indexed.
     Rgba8,
 }
@@ -180,7 +180,10 @@ impl TextureFormat {
     pub const fn for_block_bytes(block: Option<u32>) -> Self {
         match block {
             Some(8) => Self::Bc1,
-            Some(16) => Self::Bc3,
+            // The 16-byte family is DXT3, not DXT5: 583 of these textures open with an
+            // all-zero alpha block, which for DXT5 would mean "fully transparent
+            // everywhere" - impossible - but is ordinary for DXT3's raw nibbles.
+            Some(16) => Self::Bc2,
             _ => Self::Rgba8,
         }
     }
@@ -417,12 +420,12 @@ mod tests {
     }
 
     #[test]
-    fn labels_eight_bits_per_pixel_as_bc3() {
+    fn labels_eight_bits_per_pixel_as_bc2() {
         let texture = texture(64, 64, 4096, 1, vec![0; 4096]);
 
         let cooked = cook_texture(&texture).unwrap();
 
-        assert_eq!(cooked.format, TextureFormat::Bc3);
+        assert_eq!(cooked.format, TextureFormat::Bc2);
     }
 
     #[test]

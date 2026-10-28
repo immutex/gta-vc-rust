@@ -131,7 +131,7 @@ struct Report {
     cooked_bytes: u64,
     source_level_bytes: u64,
     cooked_bc1: u64,
-    cooked_bc3: u64,
+    cooked_bc2: u64,
     cooked_rgba8: u64,
     cook_failures: u32,
     dxt1_shaped: u64,
@@ -227,7 +227,7 @@ fn collect(root: &GameRoot, verbose: bool) -> Result<Report> {
         cooked_bytes: 0,
         source_level_bytes: 0,
         cooked_bc1: 0,
-        cooked_bc3: 0,
+        cooked_bc2: 0,
         cooked_rgba8: 0,
         cook_failures: 0,
         dxt1_shaped: 0,
@@ -378,7 +378,7 @@ fn tally_txd(data: &[u8], report: &mut Report) {
 
                 match cooked.format {
                     vc_cook::TextureFormat::Bc1 => report.cooked_bc1 += 1,
-                    vc_cook::TextureFormat::Bc3 => report.cooked_bc3 += 1,
+                    vc_cook::TextureFormat::Bc2 => report.cooked_bc2 += 1,
                     vc_cook::TextureFormat::Rgba8 => report.cooked_rgba8 += 1,
                 }
             }
@@ -753,7 +753,7 @@ impl Report {
         println!("  with mip chains   {}", self.textures_with_mips);
         println!("  cooked            {}", self.cooked_textures);
         println!("  cooked BC1        {}", self.cooked_bc1);
-        println!("  cooked BC3        {}", self.cooked_bc3);
+        println!("  cooked BC3        {}", self.cooked_bc2);
         println!("  cooked RGBA8      {}", self.cooked_rgba8);
         println!("  cooked bytes      {}", self.cooked_bytes);
         println!("  source bytes      {}", self.source_level_bytes);
@@ -946,7 +946,7 @@ impl Report {
                 expected::TXD_TEXTURES,
             ),
             ("cooked bc1", self.cooked_bc1, expected::TXD_BC1),
-            ("cooked bc3", self.cooked_bc3, expected::TXD_BC23),
+            ("cooked bc2", self.cooked_bc2, expected::TXD_BC23),
             ("cooked rgba8", self.cooked_rgba8, expected::TXD_PALETTED),
             ("cooked bytes", self.cooked_bytes, expected::COOKED_BYTES),
             (

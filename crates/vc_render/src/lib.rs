@@ -227,7 +227,7 @@ fn prelit_channel(channel: u8) -> f32 {
 fn upload_texture(texture: &CookedTexture) -> Image {
     let format = match texture.format {
         vc_cook::TextureFormat::Bc1 => TextureFormat::Bc1RgbaUnorm,
-        vc_cook::TextureFormat::Bc3 => TextureFormat::Bc3RgbaUnorm,
+        vc_cook::TextureFormat::Bc2 => TextureFormat::Bc2RgbaUnorm,
         vc_cook::TextureFormat::Rgba8 => TextureFormat::Rgba8UnormSrgb,
     };
 

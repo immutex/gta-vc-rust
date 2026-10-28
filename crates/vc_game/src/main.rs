@@ -119,6 +119,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .spawn((
                     Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
                     GlobalTransform::default(),
+                    Visibility::default(),
                     WorldRootMarker,
                 ))
                 .id();

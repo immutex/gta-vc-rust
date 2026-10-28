@@ -8,6 +8,7 @@
 mod census;
 mod cook;
 mod dump;
+mod formats;
 mod physics;
 mod stream;
 
@@ -37,6 +38,8 @@ enum Cmd {
         #[arg(long)]
         verbose: bool,
     },
+    /// Report the texture format families the install uses.
+    Formats,
     /// Build collision for a region and probe the ground.
     Physics {
         /// Cells to load in each direction.
@@ -77,6 +80,7 @@ fn main() -> Result<()> {
         Cmd::Cook { model, txds, out } => cook::run(&model, &txds, out.as_deref()),
         Cmd::Stream { radius } => stream::run(radius),
         Cmd::Physics { radius } => physics::run(radius),
+        Cmd::Formats => formats::run(),
         Cmd::Dump { target, depth } => dump::run(&target, depth),
     }
 }
