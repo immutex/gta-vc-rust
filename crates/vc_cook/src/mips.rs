@@ -130,6 +130,85 @@ mod tests {
     }
 
     #[test]
+    fn halves_in_the_right_place_not_transposed() {
+        // A black square in the top-left quarter. If the filter mixed rows and columns
+        // the resulting texel would land in the wrong corner, which on a road texture
+        // reads as the pattern running sideways.
+        let mut data = vec![255u8; 4 * 4 * 4];
+        for y in 0..2 {
+            for x in 0..2 {
+                let at = (y * 4 + x) * 4;
+                data[at..at + 3].fill(0);
+            }
+        }
+
+        let texture = CookedTexture {
+            name: "corner".to_owned(),
+            mask: String::new(),
+            format: TextureFormat::Rgba8,
+            width: 4,
+            height: 4,
+            levels: vec![Level {
+                width: 4,
+                height: 4,
+                data,
+            }],
+            alpha: crate::AlphaClass::Opaque,
+        };
+
+        let chain = generate(&texture);
+        let half = &chain[1];
+
+        assert_eq!((half.width, half.height), (2, 2));
+
+        // Level one is 2x2: its top-left texel averages the black quarter, its top-right
+        // averages white, and the bottom row is white.
+        assert!(half.data[0] < 40, "top-left should be near black");
+        assert!(half.data[4] > 210, "top-right should be near white");
+        assert!(half.data[8] > 210, "bottom-left should be near white");
+        assert!(half.data[12] > 210, "bottom-right should be near white");
+    }
+
+    #[test]
+    fn bc1_halves_in_the_right_place_too() {
+        let texels: Vec<crate::block::Texel> = (0..4 * 4)
+            .map(|index| {
+                let (x, y) = (index % 4, index / 4);
+
+                if x < 2 && y < 2 {
+                    [0, 0, 0, 255]
+                } else {
+                    [255, 255, 255, 255]
+                }
+            })
+            .collect();
+
+        let texture = CookedTexture {
+            name: "corner".to_owned(),
+            mask: String::new(),
+            format: TextureFormat::Bc1,
+            width: 4,
+            height: 4,
+            levels: vec![Level {
+                width: 4,
+                height: 4,
+                data: crate::block::encode(TextureFormat::Bc1, &texels, 4, 4),
+            }],
+            alpha: crate::AlphaClass::Opaque,
+        };
+
+        let chain = generate(&texture);
+        let half = &chain[1];
+        let decoded = crate::block::decode(TextureFormat::Bc1, &half.data, 2, 2);
+
+        assert_eq!((half.width, half.height), (2, 2));
+        assert!(decoded[0][0] < 60, "top-left should be dark");
+        assert!(decoded[1][0] > 180, "top-right should be light");
+        assert!(decoded[2][0] > 180, "bottom-left should be light");
+        assert!(decoded[3][0] > 180, "bottom-right should be light");
+    }
+
+    #[test]
     fn halves_into_a_full_chain() {
         let texture = CookedTexture {
             name: "test".to_owned(),
