@@ -47,6 +47,17 @@ pub fn spawn_sun(commands: &mut Commands<'_, '_>, sky: &Sky) {
 /// The `Camera` component is a parameter because the offscreen capture renders to an
 /// image rather than to the window.
 pub fn world_camera(eye: Vec3, target: Vec3, sky: &Sky, camera: Camera) -> impl Bundle {
+    // Printed because a rolled camera reads exactly like "the textures are sideways", and
+    // the basis is the only place in the frame where that can be seen from a log.
+    let transform = Transform::from_translation(eye).looking_at(target, Vec3::Y);
+    let rotation = transform.rotation;
+    println!(
+        "camera right {:?} up {:?} back {:?}",
+        rotation * Vec3::X,
+        rotation * Vec3::Y,
+        rotation * Vec3::Z,
+    );
+
     (
         Camera3d::default(),
         camera,
@@ -73,7 +84,7 @@ pub fn world_camera(eye: Vec3, target: Vec3, sky: &Sky, camera: Camera) -> impl 
             },
             ..DistanceFog::default()
         },
-        Transform::from_translation(eye).looking_at(target, Vec3::Y),
+        transform,
         FlyCamMarker,
     )
 }
