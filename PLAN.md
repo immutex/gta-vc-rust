@@ -367,9 +367,15 @@ Coverage measured by probing straight down over every instance that *does* have 
 hit**, with surface heights from -94 to 39.6 in game units — plausible for sea floor through bridge
 deck, and the check that caught the height-axis bug above.
 
-**Not wired into the game yet.** Walking needs the misses explained first: either the remaining 144
-instances have box/sphere-only collision (no mesh faces under their origin), or a placement is off.
-The next step is to separate those two before a player controller is built on top.
+**The misses are explained, and they are legitimate.** Breaking down the 201 instances of the start
+cell: **135 have no collision record at all** (vegetation, props — `veg_palmbig14` is not collidable in
+Vice City), **42 point at 84-byte stub records** whose lists are all zero (signs and screens ship empty
+COL entries), **23 have real faces** and one has a box. Nothing is misplaced; that cell is a beach.
+
+The map as a whole is collidable: **179 of 226 cells contain instances with collision faces**, and the
+richest are `(1, 1)` with 3,856 faces over 121 instances and `(-6, -1)` with 3,843 over 130. So a
+walking test should spawn in one of those rather than on the beach, and the controller can be built on
+the existing queries without a new data source.
 
 ### 4.21 The first playable slice: streaming around a free camera
 
