@@ -188,7 +188,16 @@ impl WorldPlan {
                         .any(|detail| near(&detail.position, &instance.position));
 
                 if orphan {
-                    instances.push(corrected(instance, sense));
+                    let mut instance = corrected(instance, sense);
+
+                    // The shell is the coarse twin of the ground drawn on top of it, so it
+                    // is dropped a fraction under the detail to stop the two fighting for
+                    // the same depth - visible as diagonal stripes across whole streets.
+                    if island && !keep_all {
+                        instance.position[2] -= ISLAND_SHELL_DROP;
+                    }
+
+                    instances.push(instance);
                 } else {
                     dropped_lod += 1;
                 }
@@ -276,6 +285,9 @@ impl WorldPlan {
             .map_or([0.0; 3], |(cell, _)| cell.centre(CELL_SIZE))
     }
 }
+
+/// How far under the detail terrain the island shells are placed, in world units.
+const ISLAND_SHELL_DROP: f32 = 1.0;
 
 /// Whether an effect type is an authored light.
 const fn is_light(kind: u32) -> bool {
@@ -492,9 +504,11 @@ pub fn spawn(commands: &mut Commands<'_, '_>, baked: BakedWorld, draw_distance: 
             range.clone(),
             BakedPart,
         ));
-        if part.blend {
-            entity.insert(bevy::light::NotShadowCaster);
-        }
+        // The world never casts shadows: Vice City baked its shading into the vertex
+        // colours, so a shadow map over the whole city both darkens what was already
+        // dark and redraws every visible chunk a second time. Measured on the beach, the
+        // map alone was taking the frame from 29 to 9 of 255.
+        entity.insert(bevy::light::NotShadowCaster);
     }
 }
 
