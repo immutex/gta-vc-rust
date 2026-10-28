@@ -178,9 +178,9 @@ pub fn upload_model(
             .iter()
             .map(|vertex| {
                 [
-                    srgb_to_linear(vertex.colour[0]),
-                    srgb_to_linear(vertex.colour[1]),
-                    srgb_to_linear(vertex.colour[2]),
+                    prelit_channel(vertex.colour[0]),
+                    prelit_channel(vertex.colour[1]),
+                    prelit_channel(vertex.colour[2]),
                     f32::from(vertex.colour[3]) / 255.0,
                 ]
             })
@@ -215,15 +215,13 @@ pub fn upload_model(
     parts
 }
 
-/// Prelit colours are stored sRGB-encoded; the renderer wants linear.
-fn srgb_to_linear(channel: u8) -> f32 {
-    let value = f32::from(channel) / 255.0;
-
-    if value <= 0.040_45 {
-        value / 12.92
-    } else {
-        ((value + 0.055) / 1.055).powf(2.4)
-    }
+/// Prelit colours are multiplied in the space they were authored in.
+///
+/// Vice City's fixed-function pipeline multiplied texture by vertex colour without
+/// leaving gamma space, so the bytes are the shading. Linearising them here darkened
+/// the whole city by roughly a square: a mid-grey 0.5 becomes 0.21.
+fn prelit_channel(channel: u8) -> f32 {
+    f32::from(channel) / 255.0
 }
 
 fn upload_texture(texture: &CookedTexture) -> Image {

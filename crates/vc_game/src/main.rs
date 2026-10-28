@@ -113,9 +113,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             // hangs off one rotated root instead of converting each vertex or each
             // instance. The camera stays outside the hierarchy and converts its own
             // position, which keeps the two consistent.
+            // GlobalTransform has to be present explicitly: a parent without it makes
+            // every child log B0004, and Bevy stops propagating their transforms.
             let root = commands
                 .spawn((
                     Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+                    GlobalTransform::default(),
                     WorldRootMarker,
                 ))
                 .id();
