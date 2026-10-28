@@ -867,6 +867,7 @@ dependencies = [
  "bevy_input",
  "bevy_input_focus",
  "bevy_light",
+ "bevy_log",
  "bevy_material",
  "bevy_math",
  "bevy_mesh",
@@ -4483,6 +4484,9 @@ dependencies = [
  "bevy",
  "vc_cook",
  "vc_render",
+ "vc_stream",
+ "vc_transport",
+ "vc_world",
 ]
 
 [[package]]
@@ -4509,6 +4513,19 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "vc_cook",
+ "vc_stream",
+]
+
+[[package]]
+name = "vc_stream"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "vc_cook",
+ "vc_dff",
+ "vc_transport",
+ "vc_txd",
+ "vc_world",
 ]
 
 [[package]]
@@ -5205,6 +5222,7 @@ dependencies = [
  "vc_ide",
  "vc_ipl",
  "vc_paths",
+ "vc_stream",
  "vc_timecyc",
  "vc_transport",
  "vc_txd",

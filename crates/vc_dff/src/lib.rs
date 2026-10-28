@@ -454,6 +454,10 @@ pub struct Clump {
     pub decoded_non_finite: u64,
     /// Geometries whose data could not be decoded.
     pub decode_failures: u32,
+    /// Material slots across all geometries.
+    pub material_slots: u64,
+    /// Slots that name a texture.
+    pub named_slots: u64,
 }
 
 impl Clump {
@@ -515,6 +519,14 @@ pub fn summarize(bytes: &[u8]) -> Result<Clump, DffError> {
             clump.vertices += u64::from(geometry_struct.u32_at(GEOMETRY_VERTICES)?);
             clump.morph_targets += u64::from(geometry_struct.u32_at(GEOMETRY_MORPH_TARGETS)?);
 
+            if let Ok(materials) = read_materials(&geometry) {
+                clump.material_slots += materials.len() as u64;
+                clump.named_slots += materials
+                    .iter()
+                    .filter(|material| !material.texture.is_empty())
+                    .count() as u64;
+            }
+
             match decode_geometry(geometry_struct.payload(), geometry_struct.stamp().0) {
                 Ok(decoded) => {
                     clump.decoded_triangles += decoded.triangles.len() as u64;
@@ -551,6 +563,119 @@ pub fn summarize(bytes: &[u8]) -> Result<Clump, DffError> {
     }
 
     Ok(clump)
+}
+
+/// One material slot of a geometry: the texture it uses and its alpha mask.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MaterialRef {
+    /// Diffuse texture name, empty when the slot carries none.
+    pub texture: String,
+    /// Alpha mask texture name, empty when there is none.
+    pub alpha_mask: String,
+}
+
+/// A geometry with the materials its triangles index into.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClumpGeometry {
+    /// Vertex and index data.
+    pub decoded: DecodedGeometry,
+    /// Material slots, in the order the triangles index them.
+    pub materials: Vec<MaterialRef>,
+}
+
+/// Reads a geometry's material slots.
+///
+/// # Errors
+/// Propagates [`StreamError`] for a malformed tree.
+pub fn read_materials(geometry: &Section<'_>) -> Result<Vec<MaterialRef>, DffError> {
+    // The list hangs directly off the geometry; the extension hop is a fallback
+    // because some exporters nest it there instead.
+    let list = if let Some(list) = geometry.child(SectionKind::MATERIAL_LIST).unwrap_or(None) {
+        list
+    } else {
+        let Ok(Some(extension)) = geometry.child(SectionKind::EXTENSION) else {
+            return Ok(Vec::new());
+        };
+        let Ok(Some(nested)) = extension.child(SectionKind::MATERIAL_LIST) else {
+            return Ok(Vec::new());
+        };
+
+        nested
+    };
+
+    let mut materials = Vec::new();
+
+    // Plugin chunks inside a material do not always parse as sections, so the walk
+    // is best-effort: a material that cannot be read keeps its slot, with no name.
+    for material in list.children_of(SectionKind::MATERIAL).unwrap_or_default() {
+        let mut names = Vec::new();
+
+        for texture in material
+            .children_of(SectionKind::TEXTURE)
+            .unwrap_or_default()
+        {
+            for string in texture.children_of(SectionKind::STRING).unwrap_or_default() {
+                if let Some(name) = printable(&string) {
+                    names.push(name);
+                }
+            }
+        }
+
+        materials.push(MaterialRef {
+            texture: names.first().cloned().unwrap_or_default(),
+            alpha_mask: names.get(1).cloned().unwrap_or_default(),
+        });
+    }
+
+    Ok(materials)
+}
+
+/// Reads a string chunk as NUL-terminated ASCII, ignoring binary payloads.
+fn printable(section: &Section<'_>) -> Option<String> {
+    let payload = section.payload();
+    let end = payload
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(payload.len());
+    let text = payload.get(..end)?;
+
+    if text.is_empty() || !text.iter().all(u8::is_ascii_graphic) {
+        return None;
+    }
+
+    Some(String::from_utf8_lossy(text).into_owned())
+}
+
+/// Every geometry in a clump with its materials, decoded.
+///
+/// # Errors
+/// As [`decode_clump`], plus any material tree that does not parse.
+pub fn decode_clump_with_materials(bytes: &[u8]) -> Result<Vec<ClumpGeometry>, DffError> {
+    let root = Section::root(bytes)?;
+
+    if root.kind() != SectionKind::CLUMP {
+        return Err(DffError::UnexpectedRoot { kind: root.kind() });
+    }
+
+    let mut geometries = Vec::new();
+
+    for geometry_list in root.children_of(SectionKind::GEOMETRY_LIST)? {
+        for geometry in geometry_list.children_of(SectionKind::GEOMETRY)? {
+            let geometry_struct =
+                geometry
+                    .child(SectionKind::STRUCT)?
+                    .ok_or(DffError::MissingStruct {
+                        parent: SectionKind::GEOMETRY,
+                    })?;
+
+            geometries.push(ClumpGeometry {
+                decoded: decode_geometry(geometry_struct.payload(), geometry_struct.stamp().0)?,
+                materials: read_materials(&geometry)?,
+            });
+        }
+    }
+
+    Ok(geometries)
 }
 
 /// Every geometry in a clump, decoded.

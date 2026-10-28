@@ -242,6 +242,105 @@ impl World {
     }
 }
 
+/// Side of one streaming cell, in world units. Vice City's draw distances run
+/// 150 to 300 units, so a cell that size is a natural streaming granularity.
+pub const CELL_SIZE: f32 = 200.0;
+
+/// Which cell a position falls in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CellKey {
+    /// Cell index along `x`.
+    pub x: i32,
+    /// Cell index along `y`.
+    pub y: i32,
+}
+
+impl CellKey {
+    /// The cell a world position falls in.
+    pub fn of(position: [f32; 3], size: f32) -> Self {
+        Self {
+            x: (position[0] / size).floor() as i32,
+            y: (position[1] / size).floor() as i32,
+        }
+    }
+
+    /// Centre of the cell.
+    pub fn centre(self, size: f32) -> [f32; 3] {
+        [
+            (self.x as f32 + 0.5) * size,
+            (self.y as f32 + 0.5) * size,
+            0.0,
+        ]
+    }
+}
+
+/// Placements bucketed by cell, so streaming can ask for what is nearby.
+#[derive(Debug, Clone, Default)]
+pub struct CellGrid {
+    size: f32,
+    cells: std::collections::HashMap<CellKey, Vec<u32>>,
+}
+
+impl CellGrid {
+    /// Buckets every placement in `world`.
+    pub fn build(world: &World, size: f32) -> Self {
+        let mut cells: std::collections::HashMap<CellKey, Vec<u32>> =
+            std::collections::HashMap::new();
+
+        for (index, instance) in world.instances.iter().enumerate() {
+            let key = CellKey::of(instance.position, size);
+            cells.entry(key).or_default().push(index as u32);
+        }
+
+        Self { size, cells }
+    }
+
+    /// Cell side in world units.
+    pub const fn size(&self) -> f32 {
+        self.size
+    }
+
+    /// Placements in a cell.
+    pub fn instances(&self, key: CellKey) -> &[u32] {
+        self.cells.get(&key).map_or(&[], Vec::as_slice)
+    }
+
+    /// How many cells hold placements.
+    pub fn cell_count(&self) -> usize {
+        self.cells.len()
+    }
+
+    /// The most densely placed cell, which is a reasonable place to start.
+    pub fn busiest(&self) -> Option<CellKey> {
+        self.cells
+            .iter()
+            .max_by_key(|(_, instances)| instances.len())
+            .map(|(key, _)| *key)
+    }
+
+    /// Cells within `radius` of `centre`, nearest first.
+    pub fn within(&self, centre: CellKey, radius: i32) -> Vec<CellKey> {
+        let mut keys = Vec::new();
+
+        for dx in -radius..=radius {
+            for dy in -radius..=radius {
+                let key = CellKey {
+                    x: centre.x + dx,
+                    y: centre.y + dy,
+                };
+
+                if self.cells.contains_key(&key) {
+                    keys.push(key);
+                }
+            }
+        }
+
+        keys.sort_by_key(|key| (key.x - centre.x).pow(2) + (key.y - centre.y).pow(2));
+
+        keys
+    }
+}
+
 /// Failures while reading definitions or placements.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum WorldError {
@@ -329,6 +428,47 @@ mod tests {
         let instances = parse_instances(text).unwrap();
 
         assert_eq!(instances.len(), 1);
+    }
+
+    #[test]
+    fn buckets_placements_into_cells() {
+        let world = World {
+            definitions: Vec::new(),
+            instances: vec![
+                Instance {
+                    definition_id: 1,
+                    model: "a".to_owned(),
+                    interior: 0,
+                    position: [10.0, 10.0, 0.0],
+                    scale: [1.0; 3],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                },
+                Instance {
+                    definition_id: 1,
+                    model: "a".to_owned(),
+                    interior: 0,
+                    position: [30.0, 10.0, 0.0],
+                    scale: [1.0; 3],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                },
+                Instance {
+                    definition_id: 1,
+                    model: "a".to_owned(),
+                    interior: 0,
+                    position: [210.0, 10.0, 0.0],
+                    scale: [1.0; 3],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                },
+            ],
+        };
+
+        let grid = CellGrid::build(&world, 200.0);
+
+        assert_eq!(grid.cell_count(), 2);
+        assert_eq!(grid.instances(CellKey { x: 0, y: 0 }).len(), 2);
+        assert_eq!(grid.instances(CellKey { x: 1, y: 0 }).len(), 1);
+        assert_eq!(grid.busiest(), Some(CellKey { x: 0, y: 0 }));
+        assert_eq!(grid.within(CellKey { x: 0, y: 0 }, 1).len(), 2);
     }
 
     #[test]

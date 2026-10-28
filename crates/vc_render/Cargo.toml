@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 bevy.workspace = true
 vc_cook.workspace = true
+vc_stream.workspace = true
 
 [lints]
 workspace = true

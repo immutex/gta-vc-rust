@@ -56,6 +56,10 @@ impl SectionKind {
     /// Camera.
     pub const CAMERA: Self = Self(0x05);
     /// Material.
+    /// A texture reference inside a material.
+    pub const TEXTURE: Self = Self(0x06);
+
+    /// One material of a geometry.
     pub const MATERIAL: Self = Self(0x07);
     /// Material list.
     pub const MATERIAL_LIST: Self = Self(0x08);
@@ -84,6 +88,7 @@ impl SectionKind {
         matches!(
             self.0,
             0x03 | 0x05
+                | 0x06
                 | 0x07
                 | 0x08
                 | 0x09
@@ -252,6 +257,30 @@ impl<'a> Section<'a> {
         }
 
         Ok(found)
+    }
+
+    /// Every child of `kind`, stopping at the first one that does not parse.
+    ///
+    /// Plugin payloads are not always section lists, so a caller that only wants
+    /// what it can read — a texture name inside a native texture chunk, say — uses
+    /// this instead of failing the whole structure over one bad trailing chunk.
+    pub fn children_of_lenient(&self, kind: SectionKind) -> Vec<Self> {
+        let mut found = Vec::new();
+        let Ok(children) = self.children() else {
+            return found;
+        };
+
+        for child in children {
+            let Ok(child) = child else {
+                break;
+            };
+
+            if child.kind() == kind {
+                found.push(child);
+            }
+        }
+
+        found
     }
 
     /// Reads a little-endian `u32` from the payload.

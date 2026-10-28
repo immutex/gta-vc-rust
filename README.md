@@ -52,11 +52,24 @@ It is not a mod, not a decompilation and not an emulator. No game code is execut
 
 ```bash
 export VC_GAME_ROOT="/path/to/Grand Theft Auto Vice City"
-cargo run --release
+cargo run -p vc_game --release
 ```
 
-Cooked artifacts are generated next to the game data on first run, into `vc-artifacts/`
-(git-ignored). Point `VC_GAME_ROOT` at the folder containing `models/`, `data/` and `Audio/`.
+Point `VC_GAME_ROOT` at the folder containing `models/`, `data/` and `Audio/` — or drop the install at
+`./gta-vc`. Nothing is written into the install: models and textures are read through a memory map and
+cooked in memory.
+
+Starts above the densest cell of the map and streams five cells in each direction as you fly:
+
+| Input | Action |
+|---|---|
+| `W` `A` `S` `D` | fly forward, left, back, right |
+| `Space` / `Ctrl` | rise, descend |
+| Hold left mouse | look around |
+| `Shift` | fly four times faster |
+
+The window prints a line every two seconds with the cells loaded, entities spawned, models cooked and
+textures uploaded.
 
 > [!NOTE]
 > Pre-alpha: see [Status](#status) for what runs today.

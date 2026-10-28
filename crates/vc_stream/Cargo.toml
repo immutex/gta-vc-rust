@@ -1,0 +1,18 @@
+[package]
+name = "vc_stream"
+description = "Cooks models on demand and keeps texture dictionaries shared."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+vc_cook.workspace = true
+vc_dff.workspace = true
+vc_transport.workspace = true
+vc_txd.workspace = true
+vc_world.workspace = true
+
+[lints]
+workspace = true

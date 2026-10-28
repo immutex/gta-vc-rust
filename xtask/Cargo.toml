@@ -23,6 +23,7 @@ vc_timecyc.workspace = true
 vc_transport.workspace = true
 vc_txd.workspace = true
 vc_world.workspace = true
+vc_stream.workspace = true
 
 [lints]
 workspace = true

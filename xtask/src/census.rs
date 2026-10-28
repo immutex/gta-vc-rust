@@ -121,6 +121,8 @@ struct Report {
     decoded_index_errors: u64,
     decoded_non_finite: u64,
     decode_failures: u32,
+    material_slots: u64,
+    named_slots: u64,
     dff_error_samples: Vec<String>,
     dictionaries: u32,
     textures: u64,
@@ -215,6 +217,8 @@ fn collect(root: &GameRoot, verbose: bool) -> Result<Report> {
         decoded_index_errors: 0,
         decoded_non_finite: 0,
         decode_failures: 0,
+        material_slots: 0,
+        named_slots: 0,
         dff_error_samples: Vec::new(),
         dictionaries: 0,
         textures: 0,
@@ -334,6 +338,8 @@ fn tally_dff(name: &str, data: &[u8], report: &mut Report) {
             report.decoded_index_errors += clump.decoded_index_errors;
             report.decoded_non_finite += clump.decoded_non_finite;
             report.decode_failures += clump.decode_failures;
+            report.material_slots += clump.material_slots;
+            report.named_slots += clump.named_slots;
             report.geometry_layout_failures += clump.layout_failures;
             report.prelit_geometries += clump.prelit_geometries;
             report.normal_geometries += clump.normal_geometries;
@@ -725,6 +731,8 @@ impl Report {
         println!("  bad indices       {}", self.decoded_index_errors);
         println!("  non-finite pos    {}", self.decoded_non_finite);
         println!("  decode failures   {}", self.decode_failures);
+        println!("  material slots    {}", self.material_slots);
+        println!("  named slots       {}", self.named_slots);
         println!("  dff parse errors  {}", self.dff_failures);
 
         for sample in &self.dff_error_samples {

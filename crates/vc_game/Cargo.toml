@@ -15,6 +15,9 @@ anyhow.workspace = true
 bevy.workspace = true
 vc_cook.workspace = true
 vc_render.workspace = true
+vc_stream.workspace = true
+vc_transport.workspace = true
+vc_world.workspace = true
 
 [lints]
 workspace = true

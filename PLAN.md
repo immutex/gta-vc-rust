@@ -336,6 +336,31 @@ route is now blocked on this machine. The alternatives, in order: run `reVC` as 
 black-box host (D7) since it does start on modern hardware; use the original wherever it does run; or
 fall back to asset-identity checks computed from the decoded data, and say so in the parity matrix.
 
+### 4.21 The first playable slice: streaming around a free camera
+
+A binary exists that streams the city. `cargo run -p vc_game` opens the install, indexes every texture,
+then streams cells around a free-flying camera, cooking models as they come into range.
+
+| Piece | What it does |
+|---|---|
+| `vc_stream` | Cooks models on demand; caches cooked models, dictionaries and textures; groups triangles by material slot |
+| `vc_world::CellGrid` | Buckets the 9,114 placements into **230 cells of 200 units** and answers "what is near" |
+| `vc_render` | One `Mesh` per material group, one material per texture, one GPU upload per dictionary texture |
+| `vc_game` | Streams 5×5 cells, spawns entities with the instance's quaternion and scale, flies the camera |
+
+Measured on a radius-2 region around the busiest cell: **806 models, 443,732 triangles, 6,079 draw
+groups, 5,970 textured (98.2%)**, zero failures. The remaining 1.8% name no texture at all.
+
+Two bugs this step turned up, both found by measuring rather than by looking at a screen:
+
+- **Chunk type `0x06` was missing from `rw_stream`'s container list.** Every texture-name walk returned
+  nothing, so all **29,239** material slots were nameless while the geometry, the slot count and the
+  textures themselves all looked fine. One line.
+- **Vice City duplicates shared textures across many dictionaries** and points a model at only one of
+  them (`white64` lives in dozens of TXDs). A global index built once at startup — 1,362 dictionaries,
+  12,010 textures — takes resolution from 89% to 98.2%, at the cost of a warm-up pause before the
+  window opens. Doing it lazily instead put a multi-second stall in the middle of streaming.
+
 ### 4.20 IDE and IPL layouts, and map coverage
 
 The world layer parses both text formats into types and resolves them against the archive. Three field

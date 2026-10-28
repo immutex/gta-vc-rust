@@ -8,6 +8,7 @@
 mod census;
 mod cook;
 mod dump;
+mod stream;
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -35,6 +36,12 @@ enum Cmd {
         #[arg(long)]
         verbose: bool,
     },
+    /// Cook the region around the busiest cell and report what resolved.
+    Stream {
+        /// Cells to load in each direction.
+        #[arg(long, default_value_t = 1)]
+        radius: i32,
+    },
     /// Cook one model and its textures into a versioned artifact.
     Cook {
         /// Model name in the archive, for example `landstal.dff`.
@@ -61,6 +68,7 @@ fn main() -> Result<()> {
         Cmd::Check => check(),
         Cmd::Census { verify, verbose } => census::run(verify, verbose),
         Cmd::Cook { model, txds, out } => cook::run(&model, &txds, out.as_deref()),
+        Cmd::Stream { radius } => stream::run(radius),
         Cmd::Dump { target, depth } => dump::run(&target, depth),
     }
 }
