@@ -8,6 +8,7 @@
 mod census;
 mod cook;
 mod dump;
+mod physics;
 mod stream;
 
 use std::path::PathBuf;
@@ -35,6 +36,12 @@ enum Cmd {
         /// Print per-file detail for the text formats.
         #[arg(long)]
         verbose: bool,
+    },
+    /// Build collision for a region and probe the ground.
+    Physics {
+        /// Cells to load in each direction.
+        #[arg(long, default_value_t = 1)]
+        radius: i32,
     },
     /// Cook the region around the busiest cell and report what resolved.
     Stream {
@@ -69,6 +76,7 @@ fn main() -> Result<()> {
         Cmd::Census { verify, verbose } => census::run(verify, verbose),
         Cmd::Cook { model, txds, out } => cook::run(&model, &txds, out.as_deref()),
         Cmd::Stream { radius } => stream::run(radius),
+        Cmd::Physics { radius } => physics::run(radius),
         Cmd::Dump { target, depth } => dump::run(&target, depth),
     }
 }

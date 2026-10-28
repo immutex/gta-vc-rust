@@ -56,6 +56,7 @@ vc_ide = { version = "0.1.0", path = "crates/vc_ide" }
 vc_ipl = { version = "0.1.0", path = "crates/vc_ipl" }
 vc_game = { version = "0.1.0", path = "crates/vc_game" }
 vc_paths = { version = "0.1.0", path = "crates/vc_paths" }
+vc_physics = { version = "0.1.0", path = "crates/vc_physics" }
 vc_render = { version = "0.1.0", path = "crates/vc_render" }
 vc_stream = { version = "0.1.0", path = "crates/vc_stream" }
 vc_cook = { version = "0.1.0", path = "crates/vc_cook" }

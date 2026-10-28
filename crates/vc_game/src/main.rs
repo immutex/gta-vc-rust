@@ -15,7 +15,10 @@ use std::path::{Path, PathBuf};
 use bevy::input::mouse::MouseMotion;
 use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::*;
-use vc_render::{ModelPart, TextureCache, VcMaterial, VcRenderPlugin, upload_model};
+use vc_render::{
+    ModelPart, TextureCache, VcMaterial, VcRenderPlugin, to_bevy_position, to_bevy_rotation,
+    upload_model,
+};
 use vc_stream::Streamer;
 use vc_transport::{GameRoot, ImageArchive};
 use vc_world::{CELL_SIZE, CellGrid, CellKey, ObjectDefinition, World};
@@ -105,8 +108,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         .add_systems(Startup, move |mut commands: Commands<'_, '_>| {
             commands.spawn((
                 Camera3d::default(),
-                Transform::from_xyz(centre[0] - 120.0, 55.0, centre[1])
-                    .looking_at(Vec3::new(centre[0], 5.0, centre[1]), Vec3::Y),
+                Transform::from_translation(
+                    to_bevy_position(centre) + Vec3::new(-120.0, 55.0, 0.0),
+                )
+                .looking_at(to_bevy_position(centre), Vec3::Y),
                 FlyCamMarker,
             ));
         })
@@ -269,18 +274,14 @@ fn stream_cells(
                 continue;
             }
 
-            let position = Vec3::from(instance.position);
-            let scale = Vec3::from(instance.scale);
-            let rotation = Quat::from_xyzw(
-                instance.rotation[0],
-                instance.rotation[1],
-                instance.rotation[2],
-                instance.rotation[3],
-            );
-
-            let placed = Transform::from_translation(position)
-                .with_rotation(rotation)
-                .with_scale(scale);
+            // Scale is per-axis in the same order as the position's axes.
+            let placed = Transform::from_translation(to_bevy_position(instance.position))
+                .with_rotation(to_bevy_rotation(instance.rotation))
+                .with_scale(Vec3::new(
+                    instance.scale[0],
+                    instance.scale[2],
+                    instance.scale[1],
+                ));
 
             for part in &parts {
                 commands.spawn((

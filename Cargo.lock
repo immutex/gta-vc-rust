@@ -4508,6 +4508,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vc_physics"
+version = "0.1.0"
+dependencies = [
+ "vc_col",
+]
+
+[[package]]
 name = "vc_render"
 version = "0.1.0"
 dependencies = [
@@ -4521,8 +4528,10 @@ name = "vc_stream"
 version = "0.1.0"
 dependencies = [
  "thiserror 2.0.21",
+ "vc_col",
  "vc_cook",
  "vc_dff",
+ "vc_physics",
  "vc_transport",
  "vc_txd",
  "vc_world",
@@ -5222,6 +5231,7 @@ dependencies = [
  "vc_ide",
  "vc_ipl",
  "vc_paths",
+ "vc_physics",
  "vc_stream",
  "vc_timecyc",
  "vc_transport",

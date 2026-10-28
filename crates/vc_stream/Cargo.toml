@@ -9,7 +9,9 @@ license.workspace = true
 [dependencies]
 thiserror.workspace = true
 vc_cook.workspace = true
+vc_col.workspace = true
 vc_dff.workspace = true
+vc_physics.workspace = true
 vc_transport.workspace = true
 vc_txd.workspace = true
 vc_world.workspace = true

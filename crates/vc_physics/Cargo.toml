@@ -1,0 +1,13 @@
+[package]
+name = "vc_physics"
+description = "Static collision for the vc-rs runtime: ground, walls and props."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+vc_col.workspace = true
+
+[lints]
+workspace = true

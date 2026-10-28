@@ -334,6 +334,64 @@ fn build_model(
     CookedModel { meshes }
 }
 
+/// Every collision model in the install, by name.
+#[derive(Debug, Clone, Default)]
+pub struct Colliders {
+    by_name: HashMap<String, vc_physics::Collider>,
+}
+
+impl Colliders {
+    /// Reads every `.col` file in the archive.
+    ///
+    /// `peds.col` is known not to parse (PLAN 4.10), so a file that fails is skipped
+    /// rather than treated as fatal — its models simply have no collision yet.
+    pub fn load(archive: &ImageArchive) -> Self {
+        let mut by_name = HashMap::new();
+
+        for entry in archive.entries() {
+            if !entry.has_extension("col") {
+                continue;
+            }
+
+            let Some(&index) = archive.indices_of(entry.name()).first() else {
+                continue;
+            };
+            let Ok(bytes) = archive.data(index) else {
+                continue;
+            };
+            let (collision, _leftover) = vc_col::Collision::parse_lenient(bytes);
+
+            for record in collision.records {
+                let _ = by_name.insert(
+                    record.name.to_ascii_lowercase(),
+                    vc_physics::Collider {
+                        vertices: record.vertex_list,
+                        faces: record.face_list,
+                        spheres: record.sphere_list,
+                    },
+                );
+            }
+        }
+
+        Self { by_name }
+    }
+
+    /// The collision model for a model name.
+    pub fn get(&self, model: &str) -> Option<&vc_physics::Collider> {
+        self.by_name.get(&model.to_ascii_lowercase())
+    }
+
+    /// How many models have collision.
+    pub fn len(&self) -> usize {
+        self.by_name.len()
+    }
+
+    /// Whether no model has collision.
+    pub fn is_empty(&self) -> bool {
+        self.by_name.is_empty()
+    }
+}
+
 /// Failures while streaming.
 #[derive(Debug, Error)]
 pub enum StreamError {

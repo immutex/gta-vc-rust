@@ -68,6 +68,37 @@ pub struct Bounds {
     pub max: [f32; 3],
 }
 
+/// A collision sphere.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Sphere {
+    /// Centre in model space.
+    pub centre: [f32; 3],
+    /// Radius.
+    pub radius: f32,
+    /// Surface the sphere reports.
+    pub surface: u32,
+}
+
+/// A collision box.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Box3 {
+    /// Minimum corner.
+    pub min: [f32; 3],
+    /// Maximum corner.
+    pub max: [f32; 3],
+    /// Surface the box reports.
+    pub surface: u32,
+}
+
+/// One collision face.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Face {
+    /// Vertex indices.
+    pub indices: [u16; 3],
+    /// Surface the face reports.
+    pub surface: u16,
+}
+
 /// One collision model.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Record {
@@ -87,6 +118,14 @@ pub struct Record {
     pub faces: u32,
     /// Bytes between the end of the parsed body and the declared end of the record.
     pub unexplained_tail: u32,
+    /// Spheres, when the file carries them.
+    pub sphere_list: Vec<Sphere>,
+    /// Boxes, when the file carries them.
+    pub box_list: Vec<Box3>,
+    /// Mesh vertices.
+    pub vertex_list: Vec<[f32; 3]>,
+    /// Mesh faces.
+    pub face_list: Vec<Face>,
 }
 
 /// A parsed collision file.
@@ -137,6 +176,42 @@ impl Collision {
         }
 
         Ok(Self { records })
+    }
+
+    /// Parses records until one does not parse, reporting the bytes left behind.
+    ///
+    /// Shipped files carry trailing data that is not a record — `airport.col` has
+    /// 3 KB of it — so a caller that wants every model in the file stops there
+    /// rather than losing the whole file. The count is returned so it can be
+    /// reported instead of silently swallowed.
+    pub fn parse_lenient(bytes: &[u8]) -> (Self, usize) {
+        let mut records = Vec::new();
+        let mut offset = 0;
+
+        while offset < bytes.len() {
+            let ok = bytes.get(offset..offset + 4) == Some(MAGIC)
+                && offset + HEADER_SIZE <= bytes.len()
+                && read_u32(bytes, offset + 4)
+                    .is_ok_and(|size| offset + 8 + size as usize <= bytes.len());
+
+            if !ok {
+                break;
+            }
+
+            let Ok(size) = read_u32(bytes, offset + 4) else {
+                break;
+            };
+            let declared_end = offset + 8 + size as usize;
+
+            match parse_record(bytes, offset, declared_end) {
+                Ok(record) => records.push(record),
+                Err(_) => break,
+            }
+
+            offset = declared_end;
+        }
+
+        (Self { records }, bytes.len() - offset)
     }
 
     /// Summed contents of every record.
@@ -191,18 +266,85 @@ fn parse_record(bytes: &[u8], offset: usize, declared_end: usize) -> Result<Reco
     let mut cursor = header_end + BOUNDS_SIZE;
 
     let spheres = read_count(bytes, cursor, declared_end, offset)?;
-    cursor += 4 + SPHERE_SIZE * spheres as usize;
+    let sphere_end = list_end(cursor, spheres, SPHERE_SIZE, declared_end, offset)?;
+    let sphere_start = cursor + 4;
+    let mut sphere_list = Vec::with_capacity(spheres as usize);
+
+    for index in 0..spheres as usize {
+        let at = sphere_start + SPHERE_SIZE * index;
+        sphere_list.push(Sphere {
+            centre: [
+                read_f32(bytes, at)?,
+                read_f32(bytes, at + 4)?,
+                read_f32(bytes, at + 8)?,
+            ],
+            radius: read_f32(bytes, at + 12)?,
+            surface: read_u32(bytes, at + 16)?,
+        });
+    }
+
+    cursor = sphere_end;
 
     cursor += 4; // reserved field between the sphere and box lists
 
     let boxes = read_count(bytes, cursor, declared_end, offset)?;
-    cursor += 4 + BOX_SIZE * boxes as usize;
+    let box_end = list_end(cursor, boxes, BOX_SIZE, declared_end, offset)?;
+    let box_start = cursor + 4;
+    let mut box_list = Vec::with_capacity(boxes as usize);
+
+    for index in 0..boxes as usize {
+        let at = box_start + BOX_SIZE * index;
+        box_list.push(Box3 {
+            min: [
+                read_f32(bytes, at)?,
+                read_f32(bytes, at + 4)?,
+                read_f32(bytes, at + 8)?,
+            ],
+            max: [
+                read_f32(bytes, at + 12)?,
+                read_f32(bytes, at + 16)?,
+                read_f32(bytes, at + 20)?,
+            ],
+            surface: read_u32(bytes, at + 24)?,
+        });
+    }
+
+    cursor = box_end;
 
     let vertices = read_count(bytes, cursor, declared_end, offset)?;
-    cursor += 4 + VERTEX_SIZE * vertices as usize;
+    let vertex_end = list_end(cursor, vertices, VERTEX_SIZE, declared_end, offset)?;
+    let vertex_start = cursor + 4;
+    let mut vertex_list = Vec::with_capacity(vertices as usize);
+
+    for index in 0..vertices as usize {
+        let at = vertex_start + VERTEX_SIZE * index;
+        vertex_list.push([
+            read_f32(bytes, at)?,
+            read_f32(bytes, at + 4)?,
+            read_f32(bytes, at + 8)?,
+        ]);
+    }
+
+    cursor = vertex_end;
 
     let faces = read_count(bytes, cursor, declared_end, offset)?;
-    cursor += 4 + FACE_SIZE * faces as usize;
+    let face_end = list_end(cursor, faces, FACE_SIZE, declared_end, offset)?;
+    let face_start = cursor + 4;
+    let mut face_list = Vec::with_capacity(faces as usize);
+
+    for index in 0..faces as usize {
+        let at = face_start + FACE_SIZE * index;
+        let (first, second) = read_u16x2(bytes, at)?;
+        let third = read_u16x2(bytes, at + 4)?.0;
+        let surface = read_u16x2(bytes, at + 4)?.1;
+
+        face_list.push(Face {
+            indices: [first, second, third],
+            surface,
+        });
+    }
+
+    cursor = face_end;
 
     if cursor > declared_end {
         return Err(CollError::MalformedRecord {
@@ -221,7 +363,55 @@ fn parse_record(bytes: &[u8], offset: usize, declared_end: usize) -> Result<Reco
         vertices,
         faces,
         unexplained_tail: (declared_end - cursor) as u32,
+        sphere_list,
+        box_list,
+        vertex_list,
+        face_list,
     })
+}
+
+/// Advances past a list, refusing one that would run past the record.
+const fn list_end(
+    cursor: usize,
+    count: u32,
+    entry: usize,
+    declared_end: usize,
+    offset: usize,
+) -> Result<usize, CollError> {
+    let end = cursor + 4 + entry * count as usize;
+
+    if end > declared_end {
+        return Err(CollError::MalformedRecord {
+            offset,
+            consumed: end - offset,
+            declared: declared_end - offset,
+        });
+    }
+
+    Ok(end)
+}
+
+fn read_f32(bytes: &[u8], offset: usize) -> Result<f32, CollError> {
+    let field = bytes.get(offset..offset + 4).ok_or(CollError::Truncated {
+        offset,
+        needed: offset + 4,
+        len: bytes.len(),
+    })?;
+
+    Ok(f32::from_le_bytes([field[0], field[1], field[2], field[3]]))
+}
+
+fn read_u16x2(bytes: &[u8], offset: usize) -> Result<(u16, u16), CollError> {
+    let field = bytes.get(offset..offset + 4).ok_or(CollError::Truncated {
+        offset,
+        needed: offset + 4,
+        len: bytes.len(),
+    })?;
+
+    Ok((
+        u16::from_le_bytes([field[0], field[1]]),
+        u16::from_le_bytes([field[2], field[3]]),
+    ))
 }
 
 /// Reads a list count, refusing one that cannot fit inside the record.

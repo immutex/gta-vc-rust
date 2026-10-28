@@ -336,6 +336,41 @@ route is now blocked on this machine. The alternatives, in order: run `reVC` as 
 black-box host (D7) since it does start on modern hardware; use the original wherever it does run; or
 fall back to asset-identity checks computed from the decoded data, and say so in the parity matrix.
 
+### 4.22 The world is Z-up, and that is a rendering decision not a detail
+
+Vice City's coordinates are **Z-up** with X east and Y north. Bevy is **Y-up** with -Z forward. Feeding
+the data through unchanged would have rendered the entire city lying on its side, and it also put the
+height axis in the wrong place in the first physics queries written for the walking player.
+
+The conversion is a rotation, `(x, y, z) → (x, z, -y)`, applied on spawn: positions, rotations (the
+axis moves, the angle does not) and per-axis scale. It is a rotation rather than a swap precisely so the
+city is not mirrored — a reflection would look almost right and be subtly, permanently wrong.
+
+Physics stays in the game's own axes, because collision data is authored there; only the render
+boundary converts.
+
+### 4.23 Collision: parsed, loaded, and not yet wired in
+
+`vc_physics` holds static collision as *references*: a cell stores which collider sits where, and a
+query transforms the model's triangles as it tests them, so the city's collision costs megabytes rather
+than hundreds. The MVP queries are a downward ray for the ground and a directional cast for walls.
+
+Loading found three things worth recording:
+
+| Finding | Detail |
+|---|---|
+| Collision models | **3,825** across 30 `.col` files |
+| `airport.col` has trailing junk | ~3 KB after the last record, so parsing is **lenient**: it stops and reports the leftover rather than losing the file |
+| Many models have no collision **by design** | `veg_palmbig14` and `landstal` match no record at all — vegetation, vehicles and props are not collision-modelled this way, which is why 795 of 1,162 instances in the start region legitimately have none |
+
+Coverage measured by probing straight down over every instance that *does* have collision: **223 of 367
+hit**, with surface heights from -94 to 39.6 in game units — plausible for sea floor through bridge
+deck, and the check that caught the height-axis bug above.
+
+**Not wired into the game yet.** Walking needs the misses explained first: either the remaining 144
+instances have box/sphere-only collision (no mesh faces under their origin), or a placement is off.
+The next step is to separate those two before a player controller is built on top.
+
 ### 4.21 The first playable slice: streaming around a free camera
 
 A binary exists that streams the city. `cargo run -p vc_game` opens the install, indexes every texture,

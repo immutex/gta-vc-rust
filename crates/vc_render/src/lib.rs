@@ -87,6 +87,20 @@ impl Plugin for VcRenderPlugin {
     }
 }
 
+/// Converts a world position from the game's axes to Bevy's.
+///
+/// The data is Z-up with X east and Y north; Bevy is Y-up with -Z forward. Mapping
+/// `(x, y, z)` to `(x, z, -y)` is a rotation, so handedness is preserved and the
+/// city is not mirrored.
+pub fn to_bevy_position(position: [f32; 3]) -> Vec3 {
+    Vec3::new(position[0], position[2], -position[1])
+}
+
+/// Converts a rotation the same way: the axis moves, the angle does not.
+pub fn to_bevy_rotation(rotation: [f32; 4]) -> Quat {
+    Quat::from_xyzw(rotation[0], rotation[2], -rotation[1], rotation[3])
+}
+
 /// Keeps one GPU texture per cooked texture, however many models ask for it.
 #[derive(Default, Resource)]
 pub struct TextureCache {
