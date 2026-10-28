@@ -17,8 +17,7 @@ use bevy::input::mouse::MouseMotion;
 use bevy::pbr::{DistanceFog, FogFalloff, MeshMaterial3d};
 use bevy::prelude::*;
 use vc_render::{
-    ModelPart, TextureCache, VcMaterial, VcRenderPlugin, to_bevy_position, to_bevy_rotation,
-    upload_model,
+    ModelPart, TextureCache, VcMaterial, VcRenderPlugin, to_bevy_position, upload_model,
 };
 use vc_stream::Streamer;
 use vc_timecyc::Timecycle;
@@ -110,6 +109,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             pitch: -0.25,
         })
         .add_systems(Startup, move |mut commands: Commands<'_, '_>| {
+            // Every model's vertices are in the game's Z-up axes, so the whole world
+            // hangs off one rotated root instead of converting each vertex or each
+            // instance. The camera stays outside the hierarchy and converts its own
+            // position, which keeps the two consistent.
+            let root = commands
+                .spawn((
+                    Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+                    WorldRootMarker,
+                ))
+                .id();
+            commands.insert_resource(WorldRoot(root));
+
             commands.spawn((
                 Camera3d::default(),
                 // Vice City had no HDR pipeline: the texture colour is the colour.
@@ -162,6 +173,14 @@ struct FlyCam {
 
 #[derive(Component)]
 struct FlyCamMarker;
+
+/// Marks the entity every world instance hangs from.
+#[derive(Component)]
+struct WorldRootMarker;
+
+/// The root entity itself, so streaming can parent to it.
+#[derive(Resource, Clone, Copy)]
+struct WorldRoot(Entity);
 
 #[expect(
     clippy::needless_pass_by_value,
@@ -233,6 +252,7 @@ fn stream_cells(
     mut materials: ResMut<'_, Assets<VcMaterial>>,
     mut images: ResMut<'_, Assets<Image>>,
     mut textures: ResMut<'_, TextureCache>,
+    root: Res<'_, WorldRoot>,
 ) {
     let Ok(transform) = camera.single() else {
         return;
@@ -295,20 +315,23 @@ fn stream_cells(
                 continue;
             }
 
-            // Scale is per-axis in the same order as the position's axes.
-            let placed = Transform::from_translation(to_bevy_position(instance.position))
-                .with_rotation(to_bevy_rotation(instance.rotation))
-                .with_scale(Vec3::new(
-                    instance.scale[0],
-                    instance.scale[2],
-                    instance.scale[1],
-                ));
+            // Straight from the map, in the game's own axes; the world root handles
+            // the handed-up conversion for every mesh at once.
+            let placed = Transform::from_translation(Vec3::from(instance.position))
+                .with_rotation(Quat::from_xyzw(
+                    instance.rotation[0],
+                    instance.rotation[1],
+                    instance.rotation[2],
+                    instance.rotation[3],
+                ))
+                .with_scale(Vec3::from(instance.scale));
 
             for part in &parts {
                 commands.spawn((
                     Mesh3d(part.mesh.clone()),
                     MeshMaterial3d(part.material.clone()),
                     placed,
+                    ChildOf(root.0),
                 ));
                 stream.spawned += 1;
             }
