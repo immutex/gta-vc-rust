@@ -336,6 +336,26 @@ route is now blocked on this machine. The alternatives, in order: run `reVC` as 
 black-box host (D7) since it does start on modern hardware; use the original wherever it does run; or
 fall back to asset-identity checks computed from the decoded data, and say so in the parity matrix.
 
+### 4.20 IDE and IPL layouts, and map coverage
+
+The world layer parses both text formats into types and resolves them against the archive. Three field
+layouts the first draft would have got wrong:
+
+| File | Fields | Layout |
+|---|---|---|
+| IDE `objs` | **6** | id, model, TXD, object count, draw distance, flags |
+| IDE `tobj` | **8** | the same, then on-time and off-time before the flags |
+| IPL `inst` | **13** | id, model, **interior**, position, scale, **quaternion** |
+
+Two details worth recording. `interior` is **-1 for "no interior"** — exactly one shipped placement
+uses it, and declaring the field unsigned dropped the whole 61-placement file it lives in. And the
+rotation is a **quaternion** (`x y z w`), not the Euler triple the earlier games used.
+
+Coverage, gated by the census: **4,131 definitions against 9,114 placements**, with **zero** placements
+naming an unknown id, **zero** definitions whose DFF is missing from the archive, and **zero** whose
+TXD is. Every model and every texture dictionary the map refers to exists and is named consistently,
+which is the precondition M2 needs before streaming can be built on it.
+
 ### 4.15 Spawn policy: what the data gives us and what it does not
 
 Probe 3 asked how much of the ambient spawning was script-driven. Split by actor:

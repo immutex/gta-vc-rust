@@ -67,6 +67,8 @@ mod expected {
     pub(super) const IDE_OBJECTS: u64 = 3789;
     pub(super) const IDE_TIME_OBJECTS: u64 = 342;
     pub(super) const IDE_EFFECTS: u64 = 1069;
+    pub(super) const WORLD_DEFINITIONS: u64 = 4131;
+    pub(super) const WORLD_INSTANCES: u64 = 9114;
 
     pub(super) const ARCHIVE_FINGERPRINT: &str =
         "bf76407576847344e9a005dce07bfc309473ed103c1055be13e52bd7d9d56325";
@@ -168,6 +170,13 @@ struct Report {
     ide_time_objects: u64,
     ide_effects: u64,
     ide_path: u64,
+    world_definitions: u64,
+    world_instances: u64,
+    world_unresolved: u64,
+    world_missing_models: u64,
+    world_missing_txds: u64,
+    world_parse_failures: u32,
+    world_error_samples: Vec<String>,
     timecyc_weathers: u64,
     timecyc_hours: u64,
     timecyc_far_clip_min: f32,
@@ -255,6 +264,13 @@ fn collect(root: &GameRoot, verbose: bool) -> Result<Report> {
         ide_time_objects: 0,
         ide_effects: 0,
         ide_path: 0,
+        world_definitions: 0,
+        world_instances: 0,
+        world_unresolved: 0,
+        world_missing_models: 0,
+        world_missing_txds: 0,
+        world_parse_failures: 0,
+        world_error_samples: Vec::new(),
         timecyc_weathers: 0,
         timecyc_hours: 0,
         timecyc_far_clip_min: 0.0,
@@ -267,6 +283,7 @@ fn collect(root: &GameRoot, verbose: bool) -> Result<Report> {
     tally_collision_files(&mut report, &root.path().join("models/coll"))?;
     tally_placement(&mut report, &root.path().join("data/maps"), verbose)?;
     tally_timecycle(&mut report, &root.path().join("data/timecyc.dat"))?;
+    tally_world(&mut report, &root.path().join("data/maps"), &archive)?;
 
     Ok(report)
 }
@@ -481,6 +498,62 @@ fn archive_fingerprint(archive: &ImageArchive) -> String {
     }
 
     hasher.finalize().to_hex().to_string()
+}
+
+/// Builds the world from IDE definitions and IPL placements, then checks that every
+/// placement resolves to a definition and every definition to archive entries.
+fn tally_world(report: &mut Report, directory: &Path, archive: &ImageArchive) -> Result<()> {
+    let mut world = vc_world::World::default();
+
+    for path in files_with_extension(directory, "ide")? {
+        let text = read_text(&path)?;
+
+        match vc_world::parse_definitions(&text) {
+            Ok(definitions) => world.definitions.extend(definitions),
+            Err(error) => {
+                report.world_parse_failures += 1;
+                report
+                    .world_error_samples
+                    .push(format!("{}: {error}", file_label(report, &path)));
+            }
+        }
+    }
+
+    for path in files_with_extension(directory, "ipl")? {
+        let text = read_text(&path)?;
+
+        match vc_world::parse_instances(&text) {
+            Ok(instances) => world.instances.extend(instances),
+            Err(error) => {
+                report.world_parse_failures += 1;
+                report
+                    .world_error_samples
+                    .push(format!("{}: {error}", file_label(report, &path)));
+            }
+        }
+    }
+
+    report.world_definitions = world.definitions.len() as u64;
+    report.world_instances = world.instances.len() as u64;
+    report.world_unresolved = world.unresolved_instances() as u64;
+
+    for definition in &world.definitions {
+        if archive
+            .indices_of(&format!("{}.dff", definition.model))
+            .is_empty()
+        {
+            report.world_missing_models += 1;
+        }
+
+        if archive
+            .indices_of(&format!("{}.txd", definition.txd))
+            .is_empty()
+        {
+            report.world_missing_txds += 1;
+        }
+    }
+
+    Ok(())
 }
 
 /// Reads the weather and lighting table.
@@ -728,6 +801,18 @@ impl Report {
         println!("  time objects      {}", self.ide_time_objects);
         println!("  2dfx entries      {}", self.ide_effects);
         println!("  path nodes        {}", self.ide_path);
+
+        println!("\nworld");
+        println!("  definitions       {}", self.world_definitions);
+        println!("  instances         {}", self.world_instances);
+        println!("  unresolved        {}", self.world_unresolved);
+        println!("  missing models    {}", self.world_missing_models);
+        println!("  missing txds      {}", self.world_missing_txds);
+        println!("  parse failures    {}", self.world_parse_failures);
+
+        for sample in &self.world_error_samples {
+            println!("    {sample}");
+        }
     }
 
     fn print_timecycle(&self) {
@@ -745,7 +830,7 @@ impl Report {
         clippy::too_many_lines,
         reason = "a flat table of one assertion per measured total; splitting it would only relocate the data"
     )]
-    fn expected_checks(&self) -> [(&'static str, u64, u64); 57] {
+    fn expected_checks(&self) -> [(&'static str, u64, u64); 63] {
         [
             (
                 "img entries",
@@ -917,6 +1002,24 @@ impl Report {
                 expected::IDE_TIME_OBJECTS,
             ),
             ("ide effects", self.ide_effects, expected::IDE_EFFECTS),
+            (
+                "world definitions",
+                self.world_definitions,
+                expected::WORLD_DEFINITIONS,
+            ),
+            (
+                "world instances",
+                self.world_instances,
+                expected::WORLD_INSTANCES,
+            ),
+            ("world unresolved", self.world_unresolved, 0),
+            ("world missing models", self.world_missing_models, 0),
+            ("world missing txds", self.world_missing_txds, 0),
+            (
+                "world parse failures",
+                u64::from(self.world_parse_failures),
+                0,
+            ),
             (
                 "timecyc weathers",
                 self.timecyc_weathers,

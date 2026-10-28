@@ -4535,6 +4535,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vc_world"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5201,6 +5208,7 @@ dependencies = [
  "vc_timecyc",
  "vc_transport",
  "vc_txd",
+ "vc_world",
 ]
 
 [[package]]
