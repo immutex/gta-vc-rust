@@ -133,3 +133,20 @@ committing.
 
 `PLAN.md` is the plan of record: decisions, milestone gates, the fidelity ledger and the risk
 register. Change the plan there rather than in discussion.
+
+## Build directory
+
+Cargo never removes superseded artifacts, and this workspace builds Bevy at
+`opt-level = 3`, so the target directory grows by gigabytes per week of iteration.
+`[profile.dev]` therefore uses `debug = "line-tables-only"` rather than full
+debuginfo, which is the difference between roughly 40 GB and a few.
+
+Two habits keep it in check:
+
+| Command | Effect |
+|---|---|
+| `cargo xtask disk` | Drops every `incremental/` directory (pure cache, safe) and prints before and after sizes |
+| `cargo xtask disk --all` | Drops all build artifacts; the next build is cold |
+
+`cargo xtask check` prints a warning when the target directory passes 12 GiB, so the
+growth is visible rather than discovered when the disk fills.

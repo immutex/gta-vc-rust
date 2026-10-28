@@ -359,16 +359,22 @@ fn build_model(
             .copied()
             .unwrap_or((vc_dff::identity(), [0.0; 3]));
 
+        let computed = missing_normals(&geometry.decoded);
         let vertices: Vec<SceneVertex> = geometry
             .decoded
             .vertices
             .iter()
-            .map(|vertex| {
+            .enumerate()
+            .map(|(index, vertex)| {
                 let moved = vc_dff::add(vc_dff::rotate(rotation, vertex.position), position);
+                let normal = computed
+                    .as_ref()
+                    .and_then(|normals| normals.get(index).copied())
+                    .unwrap_or(vertex.normal);
 
                 SceneVertex {
                     position: moved,
-                    normal: vc_dff::rotate(rotation, vertex.normal),
+                    normal: vc_dff::rotate(rotation, normal),
                     uv: vertex.texcoords,
                     colour: vertex.colour,
                 }
@@ -407,6 +413,79 @@ fn build_model(
     }
 
     CookedModel { meshes }
+}
+
+/// Face normals for a geometry that shipped without them.
+///
+/// The original lit most of the map with baked vertex colour, so some models have no
+/// normals at all. A physical renderer would shade those black, so they are derived
+/// from the triangles and averaged across shared vertices.
+fn missing_normals(decoded: &vc_dff::DecodedGeometry) -> Option<Vec<[f32; 3]>> {
+    let has_normals = decoded.vertices.iter().all(|vertex| {
+        vertex.normal[0].abs() > f32::EPSILON
+            || vertex.normal[1].abs() > f32::EPSILON
+            || vertex.normal[2].abs() > f32::EPSILON
+    });
+
+    if has_normals {
+        return None;
+    }
+
+    let mut normals = vec![[0.0f32; 3]; decoded.vertices.len()];
+    let mut fallback = vec![None; decoded.vertices.len()];
+
+    for triangle in &decoded.triangles {
+        let point = |index: u16| {
+            decoded
+                .vertices
+                .get(usize::from(index))
+                .map_or([0.0; 3], |vertex| vertex.position)
+        };
+        let [first, second, third] = triangle.indices.map(point);
+        let edge = |left: [f32; 3], right: [f32; 3]| {
+            [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+        };
+        let (along, across) = (edge(second, first), edge(third, first));
+        let face = [
+            along[1].mul_add(across[2], -(along[2] * across[1])),
+            along[2].mul_add(across[0], -(along[0] * across[2])),
+            along[0].mul_add(across[1], -(along[1] * across[0])),
+        ];
+
+        for index in triangle.indices {
+            if let Some(slot) = normals.get_mut(usize::from(index)) {
+                *slot = vc_dff::add(*slot, face);
+            }
+            if let Some(slot) = fallback.get_mut(usize::from(index)) {
+                slot.get_or_insert(face);
+            }
+        }
+    }
+
+    for (index, normal) in normals.iter_mut().enumerate() {
+        let length = normal[0]
+            .mul_add(
+                normal[0],
+                normal[1].mul_add(normal[1], normal[2] * normal[2]),
+            )
+            .sqrt();
+
+        // Mirrored card pairs - the way Vice City builds foliage - have opposite
+        // winding, so their face normals cancel exactly. Keeping one of the two is
+        // what makes a lit leaf card visible from both sides.
+        if length > f32::EPSILON {
+            *normal = [normal[0] / length, normal[1] / length, normal[2] / length];
+        } else if let Some(face) = fallback[index] {
+            let length = face[0]
+                .mul_add(face[0], face[1].mul_add(face[1], face[2] * face[2]))
+                .sqrt();
+            if length > f32::EPSILON {
+                *normal = [face[0] / length, face[1] / length, face[2] / length];
+            }
+        }
+    }
+
+    Some(normals)
 }
 
 /// Every collision model in the install, by name.

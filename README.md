@@ -29,12 +29,14 @@ It is not a mod, not a decompilation and not an emulator. No game code is execut
 
 ## Features
 
-- **Original assets, modern renderer** — the shipped DFF/TXD/COL/IPL data drawn with mip-mapped BC
-  textures, anisotropic filtering, clustered lighting and cascaded shadows.
+- **Original assets, modern renderer** — the shipped DFF/TXD/COL/IPL data drawn with generated
+  mip chains, sRGB BC textures, anisotropic filtering, a physically placed sun with four cascaded
+  shadow maps and timecyc-driven ambient light.
 - **Framerate independent** — a fixed 60 Hz simulation decoupled from rendering, so behaviour is
   identical at 30 fps or 240 fps.
-- **The whole city, longer draw distance** — 2.2M triangles and 9,114 placed instances, streamed per
-  map area with GPU occlusion culling, instead of the original's 2,000-unit fog wall.
+- **The whole city, resident** — 1.9M triangles and 7,400 placements baked once into 71 merged
+  chunks, so nothing pops in at a cell boundary and the far shore is visible past the original's
+  2,000-unit fog wall.
 - **A living city** — traffic, pedestrians and police driven by the shipped stats, groups and
   relationships. Missions are out of scope by design.
 - **Read-only by construction** — the installation is opened, never patched.
@@ -59,7 +61,9 @@ Point `VC_GAME_ROOT` at the folder containing `models/`, `data/` and `Audio/` �
 `./gta-vc`. Nothing is written into the install: models and textures are read through a memory map and
 cooked in memory.
 
-Starts above the densest cell of the map and streams five cells in each direction as you fly:
+Starts above the densest cell of the map and holds the whole city in memory. Pass a cell to start
+somewhere else, and an optional hour: `cargo run -p vc_game -- 1 1 18`. The window reports frame
+rate, draws, triangles and position:
 
 | Input | Action |
 |---|---|
@@ -69,8 +73,8 @@ Starts above the densest cell of the map and streams five cells in each directio
 | Hold left mouse | look around |
 | `Shift` | fly four times faster, or move twice as fast on foot |
 
-The window prints a line every two seconds with the cells loaded, entities spawned, models cooked and
-textures uploaded.
+Startup prints what was cooked: placements kept, LOD and interior placements dropped, merged draws,
+triangles and textures. `cargo run -p vc_game --example bake` runs the same bake without a window.
 
 > [!NOTE]
 > Pre-alpha: see [Status](#status) for what runs today.

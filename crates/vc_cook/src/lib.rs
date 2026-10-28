@@ -25,11 +25,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vc_txd::{Family, Texture};
 
+pub mod block;
+pub mod mips;
+
 /// Magic at the head of a cooked artifact.
 pub const MAGIC: [u8; 4] = *b"VCCK";
 
 /// Format word. Bump whenever the encoded layout changes.
-pub const FORMAT_WORD: u32 = 1;
+pub const FORMAT_WORD: u32 = 2;
 
 /// A vertex in the form the runtime uploads.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -270,9 +273,47 @@ pub struct CookedTexture {
     pub height: u16,
     /// Levels, largest first.
     pub levels: Vec<Level>,
-    /// Whether the texels actually carry transparency, decided from the data rather
-    /// than from the format, because both block families can be fully opaque.
-    pub has_alpha: bool,
+    /// How the alpha channel behaves, decided from the texels rather than the format
+    /// because both block families can be fully opaque.
+    pub alpha: AlphaClass,
+}
+
+/// How a texture's alpha channel is meant to be used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AlphaClass {
+    /// No meaningful transparency: draw it solid.
+    Opaque,
+    /// A silhouette with hard edges: discard texels below half.
+    Mask,
+    /// Mostly clear alpha used as a shape, such as a baked shadow: blend it.
+    Blend,
+}
+
+impl AlphaClass {
+    /// Classifies level zero from its alpha histogram.
+    ///
+    /// A cut-out has a real silhouette, so some texels are clear and most are not. A
+    /// texture that is almost entirely clear is not a silhouette at all: it is an
+    /// alpha mask whose colour is irrelevant, and drawing it opaque turns it into a
+    /// black card. Vice City bakes tree, car and lamp shadows that way.
+    fn of(level: Option<&Level>, format: TextureFormat) -> Self {
+        let Some(level) = level else {
+            return Self::Opaque;
+        };
+        let (transparent, total) = alpha_histogram(level, format);
+
+        if total == 0 || transparent == 0 {
+            return Self::Opaque;
+        }
+
+        if transparent * 10 >= total * 9 {
+            Self::Blend
+        } else if transparent * 200 > total {
+            Self::Mask
+        } else {
+            Self::Opaque
+        }
+    }
 }
 
 impl CookedTexture {
@@ -295,14 +336,7 @@ pub fn cook_texture(texture: &Texture) -> Result<CookedTexture, CookError> {
         Family::Unclassified => return Err(CookError::UnknownFamily),
     };
 
-    let has_alpha = levels.first().is_some_and(|level| {
-        let (transparent, total) = alpha_histogram(level, format);
-
-        // A cut-out has a real silhouette: some texels below half and most above. A
-        // handful of stray low bytes is encoder rounding, and treating that as a mask
-        // punches holes in surfaces meant to be solid.
-        total > 0 && transparent * 200 > total && transparent * 100 < total * 95
-    });
+    let alpha = AlphaClass::of(levels.first(), format);
 
     Ok(CookedTexture {
         name: texture.name.clone(),
@@ -311,7 +345,7 @@ pub fn cook_texture(texture: &Texture) -> Result<CookedTexture, CookError> {
         width: texture.width,
         height: texture.height,
         levels,
-        has_alpha,
+        alpha,
     })
 }
 

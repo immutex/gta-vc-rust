@@ -1,11 +1,13 @@
-//! Materials and upload for the vc-rs runtime.
+//! Materials, texture upload and static geometry batching for the vc-rs runtime.
 //!
-//! The material is deliberately small: a diffuse texture, a tint, and the `RenderWare` state that
-//! changes silhouettes rather than shading. Prelit vertex colours and lighting come later; this is
-//! the smallest thing that puts a real Vice City model on screen looking like itself.
+//! Vice City's world is static, so the cheapest way to draw it is also the simplest:
+//! bake every placement of a map chunk into one mesh per texture, then let the
+//! renderer cull whole chunks. A chunk of 400 units holds a hundred-odd draws instead
+//! of several thousand, and the vertex cost is the geometry itself, not an entity per
+//! material group.
 //!
-//! Uploads are deduplicated by identity: a texture shared by fifty models is uploaded once, and a
-//! geometry with one material slot becomes one mesh without copying its vertex buffer.
+//! Modeling stays in the game's axes until [`Placement`] maps it to Bevy's, so the
+//! physics crate can keep working in Z-up coordinates.
 
 #![cfg_attr(
     not(test),
@@ -13,342 +15,213 @@
 )]
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use bevy::asset::RenderAssetUsages;
-use bevy::image::ImageSampler;
-use bevy::pbr::{Material, MaterialPipeline, MaterialPipelineKey, MaterialPlugin};
+use bevy::camera::primitives::Aabb;
+use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
+use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
+use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
-use bevy::render::render_resource::encase::ShaderType;
-use bevy::render::render_resource::{
-    AsBindGroup, Extent3d, RenderPipelineDescriptor, SpecializedMeshPipelineError,
-    TextureDimension, TextureFormat,
-};
-use bevy::shader::ShaderRef;
-use vc_cook::CookedTexture;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use vc_cook::{AlphaClass, CookedTexture, TextureFormat as CookedFormat};
 use vc_stream::CookedModel;
 
-/// Path of the material shader, relative to the asset root.
-pub const SHADER_PATH: &str = "shaders/vc_material.wesl";
+/// Anisotropy for world textures: roads and pavements are almost always seen at a
+/// grazing angle, where trilinear filtering alone smears them into a blur.
+pub const ANISOTROPY: u16 = 8;
 
-/// Values the fragment shader reads for a material.
-#[derive(Clone, Debug, ShaderType)]
-pub struct VcUniforms {
-    /// Colour multiplier.
-    pub tint: Vec4,
-    /// Above zero, texels with alpha below half are discarded.
-    pub cutout: f32,
-    /// Lowest shade a baked surface may have.
-    pub floor: f32,
-    /// Light that reaches surfaces regardless of their baked shade.
-    pub ambient: Vec4,
-    /// Multiplier for the baked shade, which already contains the original's sun.
-    pub sun: Vec4,
-}
-
-/// How the world is lit: an ambient floor plus a gain on the baked prelit shade.
-#[derive(Clone, Copy, Debug)]
-pub struct Lighting {
-    /// Ambient colour, added to the prelit shade.
-    pub ambient: Vec4,
-    /// Gain applied to the prelit shade.
-    pub sun: Vec4,
-    /// Lowest shade a baked surface may have.
-    ///
-    /// Vice City's roads and under-passes are baked black because the original lit them
-    /// with dynamic lights at runtime - 24% of the world's prelit vertices are near
-    /// black. Without those lights, a floor stands in for what they would have added.
-    pub floor: f32,
-}
-
-impl Default for Lighting {
-    fn default() -> Self {
-        Self {
-            ambient: Vec4::ONE,
-            sun: Vec4::ONE,
-            floor: 0.45,
-        }
-    }
-}
-
-/// A `RenderWare`-flavoured material: one texture, one tint.
-#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
-pub struct VcMaterial {
-    /// Diffuse texture.
-    #[texture(0)]
-    #[sampler(1)]
-    pub diffuse: Option<Handle<Image>>,
-    /// Shader uniforms.
-    #[uniform(2)]
-    pub uniforms: VcUniforms,
-    /// Whether to discard cut-out texels. Kept beside the uniforms so `alpha_mode`
-    /// and the shader agree without allocating.
-    pub cutout: bool,
-}
-
-impl Default for VcMaterial {
-    fn default() -> Self {
-        Self {
-            diffuse: None,
-            uniforms: VcUniforms {
-                tint: Vec4::ONE,
-                cutout: 0.0,
-                floor: 0.0,
-                ambient: Vec4::ZERO,
-                sun: Vec4::ONE,
-            },
-            cutout: false,
-        }
-    }
-}
-
-impl Material for VcMaterial {
-    // The default mesh vertex shader, because our shader only has a fragment entry.
-    fn fragment_shader() -> ShaderRef {
-        SHADER_PATH.into()
-    }
-
-    // Only textures that actually carry transparency are masked; masking everything
-    // punched holes wherever a texture's alpha happened to be zero.
-    fn alpha_mode(&self) -> AlphaMode {
-        if self.cutout {
-            AlphaMode::Mask(0.5)
-        } else {
-            AlphaMode::Opaque
-        }
-    }
-
-    fn specialize(
-        _pipeline: &MaterialPipeline,
-        descriptor: &mut RenderPipelineDescriptor,
-        layout: &MeshVertexBufferLayoutRef,
-        _key: MaterialPipelineKey<Self>,
-    ) -> Result<(), SpecializedMeshPipelineError> {
-        // Location 5 for colour is Bevy's own convention, which the default mesh
-        // vertex shader reads; any other number would silently miss it.
-        let vertex_layout = layout.0.get_layout(&[
-            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
-            Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
-            Mesh::ATTRIBUTE_COLOR.at_shader_location(5),
-        ])?;
-        descriptor.vertex.buffers = vec![vertex_layout];
-        // Vice City's signage, railings and foliage are single quads seen from both
-        // sides; culling the back face makes them vanish as the camera swings round.
-        descriptor.primitive.cull_mode = None;
-
-        Ok(())
-    }
-}
-
-/// Registers the material with the app.
-pub struct VcRenderPlugin;
-
-impl Plugin for VcRenderPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<VcMaterial>::default())
-            .init_resource::<TextureCache>();
-    }
-}
-
-/// Converts a world position from the game's axes to Bevy's.
+/// Lowest linear value a prelit colour may keep.
 ///
-/// The data is Z-up with X east and Y north; Bevy is Y-up with -Z forward. Mapping
-/// `(x, y, z)` to `(x, z, -y)` is a rotation, so handedness is preserved and the
-/// city is not mirrored.
+/// The original baked dynamic lighting into the prelit colours, and a quarter of the
+/// map's vertices are near black because a streetlight or headlight was doing the
+/// work. Without that light, black albedo would stay black under any sun.
+pub const PRELIT_FLOOR: f32 = 0.06;
+
+/// Converts a position from the game's Z-up axes to Bevy's Y-up axes.
+///
+/// `(x, y, z) → (x, z, -y)` is a rotation, so handedness survives and the city is not
+/// mirrored.
 pub fn to_bevy_position(position: [f32; 3]) -> Vec3 {
     Vec3::new(position[0], position[2], -position[1])
 }
 
-/// Keeps one GPU texture per cooked texture, however many models ask for it.
+/// The same axis change as a quaternion, for rotating directions.
+pub fn to_bevy_axes() -> Quat {
+    Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)
+}
+
+/// A placement in Bevy space, ready to bake into vertices.
+#[derive(Clone, Copy, Debug)]
+pub struct Placement {
+    /// World translation.
+    pub translation: Vec3,
+    /// World rotation.
+    pub rotation: Quat,
+    /// Per-axis scale.
+    pub scale: Vec3,
+}
+
+impl Placement {
+    /// Maps an instance's game-space transform into Bevy space.
+    #[must_use]
+    pub fn new(position: [f32; 3], rotation: [f32; 4], scale: [f32; 3]) -> Self {
+        let axes = to_bevy_axes();
+        let local = Quat::from_xyzw(rotation[0], rotation[1], rotation[2], rotation[3]);
+
+        Self {
+            translation: to_bevy_position(position),
+            // A similarity transform, not a component shuffle: the rotation keeps its
+            // angle and takes the basis with it.
+            rotation: axes * local * axes.inverse(),
+            scale: Vec3::from_array(scale),
+        }
+    }
+
+    fn apply(&self, position: Vec3, normal: Vec3) -> (Vec3, Vec3) {
+        let inverse = Vec3::new(
+            reciprocal(self.scale.x),
+            reciprocal(self.scale.y),
+            reciprocal(self.scale.z),
+        );
+
+        (
+            self.translation + self.rotation * (position * self.scale),
+            (self.rotation * (normal * inverse)).normalize_or_zero(),
+        )
+    }
+}
+
+fn reciprocal(value: f32) -> f32 {
+    if value.abs() > f32::EPSILON {
+        value
+    } else {
+        0.0
+    }
+}
+
+/// One drawable piece of a baked chunk.
+pub struct MeshPart {
+    /// Merged mesh.
+    pub mesh: Handle<Mesh>,
+    /// Material for the texture the mesh was merged under.
+    pub material: Handle<StandardMaterial>,
+    /// Local-space bounds, for the visibility culler.
+    pub bounds: Aabb,
+    /// Whether the texture blends, which must not cast a solid shadow.
+    pub blend: bool,
+}
+
+/// Merged geometry for one chunk.
+pub struct Baked {
+    /// One mesh per texture.
+    pub parts: Vec<MeshPart>,
+    /// Triangles across the chunk.
+    pub triangles: usize,
+    /// Vertices across the chunk.
+    pub vertices: usize,
+}
+
+/// GPU textures, uploaded once however many dictionaries and models name them.
+///
+/// Keyed by name rather than by allocation: Vice City duplicates shared textures
+/// across dictionaries, so a model's own dictionary often hands back a second copy of
+/// an image another model already uploaded.
 #[derive(Default, Resource)]
 pub struct TextureCache {
-    /// Keyed by allocation address, holding the `Arc` so no address can be recycled
-    /// while it is a key.
-    uploaded: HashMap<usize, (Arc<CookedTexture>, Handle<Image>)>,
-    /// One-pixel grey, for geometry whose material names no texture.
-    fallback: Option<Handle<Image>>,
+    uploaded: HashMap<String, Handle<Image>>,
+    white: Option<Handle<Image>>,
 }
 
 impl TextureCache {
-    /// Uploads a texture once and hands back the shared handle.
-    pub fn handle(
-        &mut self,
-        texture: &Arc<CookedTexture>,
-        images: &mut Assets<Image>,
-    ) -> Handle<Image> {
-        let key = Arc::as_ptr(texture) as usize;
-
-        if let Some((_, handle)) = self.uploaded.get(&key) {
-            return handle.clone();
-        }
-
-        let handle = images.add(upload_texture(texture));
-        let _ = self
-            .uploaded
-            .insert(key, (Arc::clone(texture), handle.clone()));
-
-        handle
-    }
-
-    /// A flat grey image for materials that name no texture.
+    /// Uploads every texture that is not resident yet, generating its mip chain.
     ///
-    /// The original draws those with the material colour; without it, grey is far closer
-    /// than the white that Bevy's own fallback produces, and closer than dropping the
-    /// surface, which left holes in the beach.
-    pub fn flat_grey(&mut self, images: &mut Assets<Image>) -> Handle<Image> {
-        if let Some(handle) = &self.fallback {
-            return handle.clone();
+    /// Chain generation is the expensive part of loading and is pure arithmetic, so
+    /// it runs across every core while the asset inserts stay on this thread.
+    pub fn upload_batch(&mut self, textures: &[Arc<CookedTexture>], images: &mut Assets<Image>) {
+        if self.white.is_none() {
+            self.white = Some(images.add(white_image()));
         }
 
-        let mut image = Image::new(
-            Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-            TextureDimension::D2,
-            vec![128, 128, 128, 255],
-            TextureFormat::Rgba8UnormSrgb,
-            RenderAssetUsages::RENDER_WORLD,
-        );
-        image.sampler = ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor::linear());
+        let mut seen = std::collections::HashSet::new();
+        let pending: Vec<&Arc<CookedTexture>> = textures
+            .iter()
+            .filter(|texture| {
+                let key = key_of(texture);
+                !self.uploaded.contains_key(&key) && seen.insert(key)
+            })
+            .collect();
+        let built = generate_parallel(&pending);
 
-        let handle = images.add(image);
-        self.fallback = Some(handle.clone());
-
-        handle
-    }
-}
-
-/// One drawable piece of a model.
-#[derive(Clone)]
-pub struct ModelPart {
-    /// Mesh to draw.
-    pub mesh: Handle<Mesh>,
-    /// Material to draw it with.
-    pub material: Handle<VcMaterial>,
-}
-
-/// Uploads a cooked model into Bevy assets.
-pub fn upload_model(
-    model: &CookedModel,
-    lighting: Lighting,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<VcMaterial>,
-    images: &mut Assets<Image>,
-    textures: &mut TextureCache,
-) -> Vec<ModelPart> {
-    let mut parts = Vec::new();
-
-    for mesh in &model.meshes {
-        if mesh.vertices.is_empty() || mesh.groups.is_empty() {
-            continue;
-        }
-
-        for group in &mesh.groups {
-            // Each material group gets its own mesh, so it is compiled down to only the
-            // vertices it indexes. Uploading a full copy of the vertex buffer per group
-            // multiplied memory by the number of materials a geometry uses.
-            let mut remap = vec![u32::MAX; mesh.vertices.len()];
-            let mut indices = Vec::with_capacity(group.indices.len());
-            let mut positions = Vec::with_capacity(group.indices.len());
-            let mut normals = Vec::with_capacity(group.indices.len());
-            let mut uvs = Vec::with_capacity(group.indices.len());
-            let mut colours = Vec::with_capacity(group.indices.len());
-
-            for index in &group.indices {
-                let Some(source) = mesh.vertices.get(*index as usize) else {
-                    continue;
-                };
-                let slot = remap[*index as usize];
-
-                if slot == u32::MAX {
-                    let next = positions.len() as u32;
-                    remap[*index as usize] = next;
-                    positions.push(source.position);
-                    normals.push(source.normal);
-                    uvs.push(source.uv[0]);
-                    colours.push([
-                        prelit_channel(source.colour[0]),
-                        prelit_channel(source.colour[1]),
-                        prelit_channel(source.colour[2]),
-                        f32::from(source.colour[3]) / 255.0,
-                    ]);
-                    indices.push(next);
-                } else {
-                    indices.push(slot);
-                }
-            }
-
-            if indices.is_empty() {
-                continue;
-            }
-
-            let mut built = Mesh::new(
-                PrimitiveTopology::TriangleList,
-                RenderAssetUsages::RENDER_WORLD,
-            );
-            built.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-            built.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-            built.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-            built.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
-            built.insert_indices(Indices::U32(indices));
-
-            // A group with no resolved texture draws with flat grey rather than Bevy's
-            // white default, which read as a hole in the world; white patches on the
-            // beach were exactly this.
-            let diffuse = match group.texture.as_ref() {
-                Some(texture) => textures.handle(texture, images),
-                None => textures.flat_grey(images),
-            };
-            let cutout = group
-                .texture
-                .as_ref()
-                .is_some_and(|texture| texture.has_alpha);
-
-            parts.push(ModelPart {
-                mesh: meshes.add(built),
-                material: materials.add(VcMaterial {
-                    diffuse: Some(diffuse),
-                    uniforms: VcUniforms {
-                        tint: Vec4::ONE,
-                        cutout: if cutout { 1.0 } else { 0.0 },
-                        floor: lighting.floor,
-                        ambient: lighting.ambient,
-                        sun: lighting.sun,
-                    },
-                    cutout,
-                }),
-            });
+        for (texture, image) in pending.into_iter().zip(built) {
+            let _ = self.uploaded.insert(key_of(texture), images.add(image));
         }
     }
 
-    parts
+    /// The image for a texture that [`Self::upload_batch`] has seen.
+    #[must_use]
+    pub fn handle(&self, texture: &Arc<CookedTexture>) -> Option<Handle<Image>> {
+        self.uploaded.get(&key_of(texture)).cloned()
+    }
+
+    /// One white texel, for materials whose colour lives in the vertex data.
+    #[must_use]
+    pub fn white(&self) -> Handle<Image> {
+        self.white.clone().unwrap_or_default()
+    }
+
+    /// How many textures are resident.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.uploaded.len()
+    }
+
+    /// Whether nothing has been uploaded.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.uploaded.is_empty()
+    }
 }
 
-/// Prelit colours are multiplied in the space they were authored in.
-///
-/// Vice City's fixed-function pipeline multiplied texture by vertex colour without
-/// leaving gamma space, so the bytes are the shading. Linearising them here darkened
-/// the whole city by roughly a square: a mid-grey 0.5 becomes 0.21.
-fn prelit_channel(channel: u8) -> f32 {
-    f32::from(channel) / 255.0
+fn key_of(texture: &CookedTexture) -> String {
+    texture.name.to_ascii_lowercase()
 }
 
-fn upload_texture(texture: &CookedTexture) -> Image {
+fn generate_parallel(textures: &[&Arc<CookedTexture>]) -> Vec<Image> {
+    if textures.is_empty() {
+        return Vec::new();
+    }
+
+    let workers = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let workers = workers.min(textures.len()).max(1);
+    let chunk = textures.len().div_ceil(workers);
+
+    std::thread::scope(|scope| {
+        textures
+            .chunks(chunk)
+            .map(|slice| {
+                scope.spawn(move || {
+                    slice
+                        .iter()
+                        .map(|texture| image_for(texture))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .flat_map(|handle| handle.join().unwrap_or_default())
+            .collect()
+    })
+}
+
+fn image_for(texture: &CookedTexture) -> Image {
     let format = match texture.format {
-        vc_cook::TextureFormat::Bc1 => TextureFormat::Bc1RgbaUnorm,
-        vc_cook::TextureFormat::Bc2 => TextureFormat::Bc2RgbaUnorm,
-        vc_cook::TextureFormat::Rgba8 => TextureFormat::Rgba8UnormSrgb,
+        CookedFormat::Bc1 => TextureFormat::Bc1RgbaUnormSrgb,
+        CookedFormat::Bc2 => TextureFormat::Bc2RgbaUnormSrgb,
+        CookedFormat::Rgba8 => TextureFormat::Rgba8UnormSrgb,
     };
+    let levels = vc_cook::mips::generate(texture);
+    let mut data = Vec::with_capacity(levels.iter().map(|level| level.data.len()).sum());
 
-    // Every level is uploaded, not just the largest. Sampling a city's worth of
-    // block-compressed texture with a single level shimmers badly at distance, which
-    // reads as glitching rather than as aliasing.
-    let mut data = Vec::new();
-    for level in &texture.levels {
+    for level in &levels {
         data.extend_from_slice(&level.data);
     }
 
@@ -363,16 +236,396 @@ fn upload_texture(texture: &CookedTexture) -> Image {
         format,
         RenderAssetUsages::RENDER_WORLD,
     );
-    image.texture_descriptor.mip_level_count = texture.levels.len().max(1) as u32;
-
-    // Vice City's texture coordinates tile well past 0..1, so the sampler must repeat
-    // rather than clamp, or every tiled surface smears its edge texel.
-    image.sampler = ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
-        address_mode_u: bevy::image::ImageAddressMode::Repeat,
-        address_mode_v: bevy::image::ImageAddressMode::Repeat,
-        address_mode_w: bevy::image::ImageAddressMode::Repeat,
-        ..bevy::image::ImageSamplerDescriptor::linear()
+    image.texture_descriptor.mip_level_count = levels.len().max(1) as u32;
+    // Texture coordinates tile well past 0..1 in this map, so the sampler repeats.
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_w: ImageAddressMode::Repeat,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        anisotropy_clamp: ANISOTROPY,
+        ..ImageSamplerDescriptor::linear()
     });
 
     image
+}
+
+fn white_image() -> Image {
+    let mut image = Image::new(
+        Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        vec![255, 255, 255, 255],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.sampler = ImageSampler::linear();
+
+    image
+}
+
+/// One material per texture name and alpha behaviour.
+#[derive(Default, Resource)]
+pub struct MaterialCache {
+    materials: HashMap<(String, AlphaClass), Handle<StandardMaterial>>,
+}
+
+impl MaterialCache {
+    /// The material for a texture, created on first use.
+    pub fn get(
+        &mut self,
+        texture: Option<&Arc<CookedTexture>>,
+        textures: &TextureCache,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> Handle<StandardMaterial> {
+        let key = texture.map_or((String::new(), AlphaClass::Opaque), |texture| {
+            (key_of(texture), texture.alpha)
+        });
+
+        if let Some(handle) = self.materials.get(&key) {
+            return handle.clone();
+        }
+
+        let clear = texture.is_some_and(|texture| texture.alpha == AlphaClass::Blend);
+        let mask = texture.is_some_and(|texture| texture.alpha == AlphaClass::Mask);
+        let image = texture
+            .and_then(|texture| textures.handle(texture))
+            .unwrap_or_else(|| textures.white());
+
+        let material = StandardMaterial {
+            base_color: Color::WHITE,
+            base_color_texture: Some(image),
+            perceptual_roughness: 0.85,
+            metallic: 0.0,
+            alpha_mode: if clear {
+                AlphaMode::Blend
+            } else if mask {
+                AlphaMode::Mask(0.5)
+            } else {
+                AlphaMode::Opaque
+            },
+            cull_mode: None,
+            double_sided: true,
+            ..StandardMaterial::default()
+        };
+
+        let handle = materials.add(material);
+        let _ = self.materials.insert(key, handle.clone());
+
+        handle
+    }
+
+    /// How many materials exist.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.materials.len()
+    }
+
+    /// Whether no material has been made.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.materials.is_empty()
+    }
+}
+
+/// A blended, lightly reflective surface for the ocean.
+pub fn water_material(
+    tint: Color,
+    texture: Handle<Image>,
+    materials: &mut Assets<StandardMaterial>,
+) -> Handle<StandardMaterial> {
+    materials.add(StandardMaterial {
+        base_color: tint,
+        base_color_texture: Some(texture),
+        alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.08,
+        metallic: 0.0,
+        reflectance: 0.3,
+        cull_mode: None,
+        double_sided: true,
+        ..StandardMaterial::default()
+    })
+}
+
+#[derive(Clone, Copy)]
+struct Vertex {
+    position: Vec3,
+    normal: Vec3,
+    uv: Vec2,
+    colour: Vec4,
+}
+
+/// Accumulates model geometry for one chunk and emits one mesh per texture.
+#[derive(Default)]
+pub struct Batcher {
+    buckets: HashMap<(String, AlphaClass), Bucket>,
+    remap: Vec<u32>,
+}
+
+#[derive(Default)]
+struct Bucket {
+    texture: Option<Arc<CookedTexture>>,
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
+    min: Vec3,
+    max: Vec3,
+}
+
+impl Batcher {
+    /// Adds every placed part of a model, transformed into world space.
+    pub fn push(&mut self, model: &CookedModel, placement: &Placement) {
+        let to_linear = srgb_table();
+
+        for mesh in &model.meshes {
+            for group in &mesh.groups {
+                let Some(texture) = group.texture.as_ref() else {
+                    self.push_group(None, mesh, &group.indices, placement, to_linear);
+
+                    continue;
+                };
+                self.push_group(Some(texture), mesh, &group.indices, placement, to_linear);
+            }
+        }
+    }
+
+    fn push_group(
+        &mut self,
+        texture: Option<&Arc<CookedTexture>>,
+        mesh: &vc_stream::CookedMesh,
+        indices: &[u32],
+        placement: &Placement,
+        to_linear: &[f32; 256],
+    ) {
+        let key = texture.map_or((String::new(), AlphaClass::Opaque), |texture| {
+            (key_of(texture), texture.alpha)
+        });
+        let bucket = self.buckets.entry(key).or_insert_with(|| Bucket {
+            texture: texture.cloned(),
+            min: Vec3::splat(f32::INFINITY),
+            max: Vec3::splat(f32::NEG_INFINITY),
+            ..Bucket::default()
+        });
+
+        self.remap.clear();
+        self.remap.resize(mesh.vertices.len(), u32::MAX);
+
+        for index in indices {
+            let Some(source) = mesh.vertices.get(*index as usize) else {
+                continue;
+            };
+            let slot = self.remap[*index as usize];
+
+            if slot == u32::MAX {
+                let (position, normal) = placement.apply(
+                    Vec3::from_array(source.position),
+                    Vec3::from_array(source.normal),
+                );
+                // The new vertex's index is the bucket's current length; taking it
+                // from the index list instead would double-count earlier groups.
+                let next = bucket.vertices.len() as u32;
+                self.remap[*index as usize] = next;
+                bucket.min = bucket.min.min(position);
+                bucket.max = bucket.max.max(position);
+                bucket.vertices.push(Vertex {
+                    position,
+                    normal,
+                    uv: Vec2::from_array(source.uv[0]),
+                    colour: Vec4::new(
+                        to_linear[usize::from(source.colour[0])].max(PRELIT_FLOOR),
+                        to_linear[usize::from(source.colour[1])].max(PRELIT_FLOOR),
+                        to_linear[usize::from(source.colour[2])].max(PRELIT_FLOOR),
+                        f32::from(source.colour[3]) / 255.0,
+                    ),
+                });
+                bucket.indices.push(next);
+            } else {
+                bucket.indices.push(slot);
+            }
+        }
+    }
+
+    /// Emits one drawable mesh per texture.
+    pub fn finish(
+        self,
+        meshes: &mut Assets<Mesh>,
+        materials: &mut Assets<StandardMaterial>,
+        textures: &TextureCache,
+        cache: &mut MaterialCache,
+    ) -> Baked {
+        let (mut triangles, mut vertices) = (0, 0);
+        let parts: Vec<MeshPart> = self
+            .buckets
+            .into_values()
+            .filter(|bucket| !bucket.indices.is_empty())
+            .map(|bucket| {
+                triangles += bucket.indices.len() / 3;
+                vertices += bucket.vertices.len();
+                let mut mesh = Mesh::new(
+                    PrimitiveTopology::TriangleList,
+                    RenderAssetUsages::RENDER_WORLD,
+                );
+                mesh.insert_attribute(
+                    Mesh::ATTRIBUTE_POSITION,
+                    bucket
+                        .vertices
+                        .iter()
+                        .map(|vertex| vertex.position.to_array())
+                        .collect::<Vec<_>>(),
+                );
+                mesh.insert_attribute(
+                    Mesh::ATTRIBUTE_NORMAL,
+                    bucket
+                        .vertices
+                        .iter()
+                        .map(|vertex| vertex.normal.to_array())
+                        .collect::<Vec<_>>(),
+                );
+                mesh.insert_attribute(
+                    Mesh::ATTRIBUTE_UV_0,
+                    bucket
+                        .vertices
+                        .iter()
+                        .map(|vertex| vertex.uv.to_array())
+                        .collect::<Vec<_>>(),
+                );
+                mesh.insert_attribute(
+                    Mesh::ATTRIBUTE_COLOR,
+                    bucket
+                        .vertices
+                        .iter()
+                        .map(|vertex| vertex.colour.to_array())
+                        .collect::<Vec<_>>(),
+                );
+                mesh.insert_indices(Indices::U32(bucket.indices));
+
+                let material = cache.get(bucket.texture.as_ref(), textures, materials);
+
+                MeshPart {
+                    mesh: meshes.add(mesh),
+                    material,
+                    bounds: Aabb::from_min_max(bucket.min, bucket.max),
+                    blend: bucket
+                        .texture
+                        .as_ref()
+                        .is_some_and(|texture| texture.alpha == AlphaClass::Blend),
+                }
+            })
+            .collect();
+
+        Baked {
+            parts,
+            triangles,
+            vertices,
+        }
+    }
+}
+
+fn srgb_table() -> &'static [f32; 256] {
+    static TABLE: OnceLock<[f32; 256]> = OnceLock::new();
+
+    TABLE.get_or_init(|| {
+        let mut table = [0.0f32; 256];
+        for (value, slot) in table.iter_mut().enumerate() {
+            let channel = value as f32 / 255.0;
+            *slot = if channel <= 0.040_45 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            };
+        }
+
+        table
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_game_axes_without_mirroring() {
+        assert_eq!(to_bevy_position([1.0, 2.0, 3.0]), Vec3::new(1.0, 3.0, -2.0));
+
+        // A rotation by 90 degrees about the game's up axis must become a rotation
+        // about Bevy's up axis, with the same angle.
+        let game = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+        let placement = Placement::new([0.0; 3], [game.x, game.y, game.z, game.w], [1.0; 3]);
+        let east = placement.rotation * to_bevy_position([1.0, 0.0, 0.0]);
+
+        // East turned north: north is -Z in Bevy, and the city must not mirror.
+        assert!((east - Vec3::new(0.0, 0.0, -1.0)).length() < 1e-5, "{east}");
+    }
+
+    fn two_triangles() -> vc_stream::CookedModel {
+        let vertex = |position: [f32; 3]| vc_cook::SceneVertex {
+            position,
+            normal: [0.0, 1.0, 0.0],
+            uv: [[0.0; 2]; 2],
+            colour: [255; 4],
+        };
+
+        vc_stream::CookedModel {
+            meshes: vec![vc_stream::CookedMesh {
+                vertices: vec![
+                    vertex([0.0, 0.0, 0.0]),
+                    vertex([1.0, 0.0, 0.0]),
+                    vertex([0.0, 0.0, 1.0]),
+                    vertex([2.0, 0.0, 0.0]),
+                    vertex([3.0, 0.0, 0.0]),
+                    vertex([2.0, 0.0, 1.0]),
+                ],
+                groups: vec![
+                    vc_stream::MaterialGroup {
+                        texture: None,
+                        indices: vec![0, 1, 2],
+                    },
+                    vc_stream::MaterialGroup {
+                        texture: None,
+                        indices: vec![3, 4, 5],
+                    },
+                ],
+            }],
+        }
+    }
+
+    #[test]
+    fn keeps_indices_inside_the_merged_bucket() {
+        let mut batcher = Batcher::default();
+        let placement = Placement::new([0.0; 3], [0.0, 0.0, 0.0, 1.0], [1.0; 3]);
+        let model = two_triangles();
+
+        // Pushing twice puts four groups into one bucket, which is where an offset
+        // taken from the index list instead of the vertex list goes out of range.
+        batcher.push(&model, &placement);
+        batcher.push(&model, &placement);
+
+        let mut meshes = Assets::<Mesh>::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let textures = TextureCache::default();
+        let mut cache = MaterialCache::default();
+        let baked = batcher.finish(&mut meshes, &mut materials, &textures, &mut cache);
+
+        assert_eq!(baked.triangles, 4);
+        assert_eq!(baked.vertices, 12);
+        assert_eq!(baked.parts.len(), 1);
+
+        let mesh = meshes.get(&baked.parts[0].mesh).unwrap_or_else(|| unreachable!());
+        let Some(Indices::U32(indices)) = mesh.indices() else {
+            unreachable!("a merged mesh is indexed");
+        };
+        assert!(indices.iter().all(|index| *index < 12), "{indices:?}");
+    }
+
+    #[test]
+    fn keeps_prelit_colour_out_of_black() {
+        let table = srgb_table();
+
+        assert!(table[0].max(PRELIT_FLOOR) >= PRELIT_FLOOR);
+        assert!((table[255] - 1.0).abs() < 1e-5);
+    }
 }

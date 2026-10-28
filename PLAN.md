@@ -381,6 +381,83 @@ triangles over 49 vertices spanning 16.6 × 17.0 × 18.3 units, built from mirro
 They are collidable-free and their textures live in `generic.txd` and `gtatrees.txd` with alpha masks,
 which is why the cut-out fix matters more than any other single change to how the city looks.
 
+### 4.25 The resident renderer: rotation sense settled, whole map, physical light
+
+The first playable slice streamed a 5×5 cell window and drew every material group as its own
+entity. That is gone. The map is now baked once, whole, into merged chunks and lit by a real sun.
+The measurements below come from `cargo run --release -p vc_game --example bake` on the reference
+machine.
+
+**The rotation sense is settled, and it was inverted.** The IPL quaternion is the *inverse* of the
+rotation the game applied. The earlier `cargo xtask facing` tests could not see it because they
+measured distances that a yaw mirror leaves unchanged. Measuring the lamp arm itself — the mean XY
+of the top 20 % of each lamp model's vertices minus the bottom 20 % — against the vector from the
+pavement path to the vehicle path separates the readings cleanly:
+
+| reading | mean cos(arm, road) | arms over the carriageway |
+|---|---|---|
+| as stored | 0.132 | 60 % (201 of 605 lamps point the wrong way) |
+| conjugated | **0.923** | **97 %** |
+
+The stored reading is bimodal at ±1, which is what a mirror looks like: the arms stay collinear
+with the road normal and half of them hang over the pavement. The conjugate collapses that to
+576 of 605 in the top bin, and controls invert as expected (`bussign1` faces the pavement, 0 % vs
+34 %). The fix is applied once, when the plan is built, so rendering, collision and any future
+`2dfx` light placement all agree. The `R` toggle and the calibration lamps are deleted.
+
+**Black patches were opaque alpha masks.** `vc_cook` classified a texture as a cut-out only when
+some texels were clear and most were not. Vice City's baked shadow decals are the opposite: 95.9–100 %
+of their texels are clear, their RGB is uniformly zero, and the alpha *is* the shadow. Classified
+opaque, each one drew as a solid black card — 142 models, 238 placements, 2.8 % of the ground on
+the whole map and about 7 % around the start cell. Textures now carry one of three behaviours:
+`Opaque`, `Mask` (a real silhouette) or `Blend` (alpha as a shape). Blend materials also stop
+casting shadows, which a solid quad otherwise does.
+
+**The whole map is resident.** 7,421 placements bake into **71 chunks of 400 units**, merged into
+one mesh per texture per chunk: **7,622 draws, 1,881,246 triangles, 2,377,086 vertices, 3,135
+textures, zero cook failures**, in about 2 s on 12 cores. Merging is what makes this affordable:
+the same geometry as one entity per material group is 27,404 entities, and per-model instancing
+costs 21,950 draws across the map because almost every placement is a different model. A 2×2-cell
+chunk also culls a street corner without splitting a texture into dozens of meshes; a 3×3 chunk
+saves only 8 % of draws and culls much more coarsely.
+
+Two data defects surfaced while filtering and are now handled by rule, not by hand:
+
+| Defect | Scale | Rule |
+|---|---|---|
+| `interior` is not a reliable indoors flag: road, land and beach models are tagged `13` | 42 outdoor placements (166 k u² of ground) | keep any `interior > 0` placement whose position is shared by a LOD shell — shells exist only for outside scenery |
+| Some LOD shells have no detail twin, so dropping all LODs leaves holes | 36 placements | keep those, except the four `IslandLOD*` shells, which are coarse stand-ins for detail drawn elsewhere |
+
+**Lighting is physical now.** The single white fill is replaced by:
+
+- a `DirectionalLight` at the hour's sun direction (east at 6h, highest at noon, west at 18h) with
+  the timecyc's directional colour and 10,000 lux scaled by its brightness, four shadow cascades to
+  600 units;
+- a `GlobalAmbientLight` from the timecyc's ambient column, so shade is warm at noon and cool at
+  night;
+- HDR, ACES-fitted tonemapping (no LUT dependency), 4× MSAA, sRGB textures and prelit vertex colours linearised
+  with a 0.06 floor. That floor is what stands in for the dynamic lights the original baked out:
+  24 % of the world's vertices were black because a streetlight or headlight was doing the work.
+
+The camera far plane is 12,000 units and the timecyc fog is stretched by 2.5 (to 5,000 at noon) so
+the far shore is visible rather than pasted into a haze wall.
+
+**Textures got their mips.** 5,465 of 6,075 unique textures ship with a single level; at a
+5,000-unit view that aliases into noise. Mips are now generated in linear light, re-encoded as BC1
+or BC2 (a bounding-box quantiser, mean channel error 1.1/255 on a decode-encode round trip) and
+uploaded as sRGB with 8× anisotropy. The whole corpus is 105 MB compressed with mips; the map only
+references 3,135 of them.
+
+**Known gap.** 7,622 merged draws across the whole map is above §6's 1,500-draw worst-case target.
+Frustum culling normally leaves three to four thousand visible, which a 5060 carries at 1080p, but
+the target needs texture atlasing or meshlet-style indirect draws. That is the next rendering task,
+not a regression hidden by a smaller view.
+
+**Verification without a GPU.** `examples/bake.rs` runs the whole cook, mip and merge path headless
+and prints the counts above, which is how the LOD, interior and normal fixes were checked.
+`examples/shot.rs` renders a frame to an image through Vulkan's lavapipe, which is slow but needs no
+display server.
+
 ### 4.23 Collision: parsed, loaded, and not yet wired in
 
 `vc_physics` holds static collision as *references*: a cell stores which collider sits where, and a

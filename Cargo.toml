@@ -95,6 +95,10 @@ redundant_pub_crate = { level = "allow", priority = 11 }
 
 [profile.dev]
 opt-level = 1
+# Full debuginfo for Bevy comes to about 40 GB of target directory. Line tables are
+# enough to get a backtrace with file and line, and keep the profile an order of
+# magnitude smaller.
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 3

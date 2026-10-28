@@ -51,7 +51,7 @@ pub(crate) fn run(x: i32, y: i32) -> Result<()> {
                     if group
                         .texture
                         .as_ref()
-                        .is_some_and(|texture| texture.has_alpha)
+                        .is_some_and(|texture| texture.alpha != vc_cook::AlphaClass::Opaque)
                     {
                         cutout += 1;
                     }

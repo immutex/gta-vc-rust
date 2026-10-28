@@ -7,6 +7,7 @@
 
 mod census;
 mod cook;
+mod disk;
 mod dump;
 mod facing;
 mod formats;
@@ -85,6 +86,12 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Report and prune build artifacts that have outgrown their budget.
+    Disk {
+        /// Remove every artifact, not just the incremental cache.
+        #[arg(long)]
+        all: bool,
+    },
     /// Print the `RenderWare` section tree of a file or archive entry.
     Dump {
         /// A file path, or `img:<name>` to read an entry from `models/gta3.img`.
@@ -109,11 +116,13 @@ fn main() -> Result<()> {
             _ => None,
         })),
         Cmd::Facing => facing::run(),
+        Cmd::Disk { all } => disk::run(all),
         Cmd::Dump { target, depth } => dump::run(&target, depth),
     }
 }
 
 fn check() -> Result<()> {
+    disk::warn_if_bloated(&target_dir());
     run("cargo", &["fmt", "--all", "--", "--check"])?;
     run(
         "cargo",

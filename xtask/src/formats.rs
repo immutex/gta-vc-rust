@@ -38,7 +38,7 @@ pub(crate) fn run(filter: Option<&str>) -> Result<()> {
             total += 1;
 
             if let Ok(cooked) = vc_cook::cook_texture(texture) {
-                if cooked.has_alpha {
+                if cooked.alpha != vc_cook::AlphaClass::Opaque {
                     cutouts += 1;
                 }
 
@@ -46,12 +46,12 @@ pub(crate) fn run(filter: Option<&str>) -> Result<()> {
                     && texture.name.to_ascii_lowercase().contains(needle)
                 {
                     println!(
-                        "  {:<24} {:?} {}x{} alpha={} mips={}",
+                        "  {:<24} {:?} {}x{} alpha={:?} mips={}",
                         texture.name,
                         cooked.format,
                         cooked.width,
                         cooked.height,
-                        cooked.has_alpha,
+                        cooked.alpha,
                         cooked.levels.len()
                     );
                 }
