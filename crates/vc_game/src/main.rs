@@ -51,7 +51,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     let colliders = ColliderSet(Colliders::load(streamer.archive()));
-    let start = plan.start(options.cell);
+    let cell = options.cell.unwrap_or(CellKey { x: 1, y: 1 });
+    let start = plan.start(Some(cell));
     let target = to_bevy_position(start);
     let eye = target + Vec3::new(-OPENING_BACK, OPENING_HEIGHT, 0.0);
     let camera = FlyCam::looking_at(eye, target);
@@ -78,6 +79,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             on_ground: false,
         })
         .insert_resource(StartShot { eye, target })
+        .insert_resource(StartCell(cell))
         .init_resource::<TextureCache>()
         .init_resource::<MaterialCache>()
         .init_resource::<Stats>()
@@ -185,6 +187,10 @@ struct ColliderSet(Colliders);
 #[derive(Resource)]
 struct Effects(Vec<vc_world::Effect>);
 
+/// The cell the opening shot is framed on.
+#[derive(Resource, Clone, Copy)]
+struct StartCell(CellKey);
+
 /// Command-line start cell and hour.
 struct Options {
     cell: Option<CellKey>,
@@ -225,6 +231,8 @@ fn setup_world(
     mut commands: Commands<'_, '_>,
     mut source: ResMut<'_, Source>,
     plan: Res<'_, WorldPlan>,
+    cell: Res<'_, StartCell>,
+    mut start: ResMut<'_, StartShot>,
     colliders: Res<'_, ColliderSet>,
     mut physics: ResMut<'_, Physics>,
     mut textures: ResMut<'_, TextureCache>,
@@ -259,6 +267,16 @@ fn setup_world(
         started.elapsed().as_secs_f32(),
     );
     stats.0 = baked.stats.clone();
+
+    // Frame the opening shot above whatever is actually in the cell, not a fixed height
+    // above its centre - otherwise the camera can start inside the terrain.
+    let high = plan.skyline(cell.0).max(0.0);
+
+    if high + 20.0 > start.eye.y {
+        let lift = high + 20.0 - start.eye.y;
+        start.eye.y += lift;
+        start.target.y += lift * 0.5;
+    }
 
     world::spawn(&mut commands, baked, sky.fog_end);
 

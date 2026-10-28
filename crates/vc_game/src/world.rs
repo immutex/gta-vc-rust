@@ -282,6 +282,23 @@ impl WorldPlan {
 
     /// Where to start: the requested cell, or the one the map fills most.
     #[must_use]
+    /// The highest placement in a cell, which is a safe height to frame it from.
+    ///
+    /// The opening shot used a fixed height above the cell centre. Where the streets are
+    /// higher than that, the camera sits inside the terrain and the floor fills the frame
+    /// as a wall - which reads as the world being on its side.
+    #[must_use]
+    pub fn skyline(&self, cell: CellKey) -> f32 {
+        self.instances
+            .iter()
+            .filter(|instance| CellKey::of(instance.position, CELL_SIZE) == cell)
+            .fold(f32::NEG_INFINITY, |high, instance| {
+                high.max(instance.position[2])
+            })
+    }
+
+    /// Centre of the cell to open on, or the busiest cell when none is asked for.
+    #[must_use]
     pub fn start(&self, requested: Option<CellKey>) -> [f32; 3] {
         if let Some(cell) = requested {
             return cell.centre(CELL_SIZE);
