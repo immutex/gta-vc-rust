@@ -241,7 +241,7 @@ pub fn cook_texture(texture: &Texture) -> Result<CookedTexture, CookError> {
     };
 
     let has_alpha = levels.first().is_some_and(|level| match format {
-        TextureFormat::Bc1 => level.data.chunks_exact(8).any(|block| {
+        TextureFormat::Bc1 => level.data.as_chunks::<8>().0.iter().any(|block| {
             // DXT1 carries alpha only in its three-colour mode, where index 3 is
             // transparent. Endpoint order alone means nothing: shipped art uses the
             // reversed order even for opaque blocks, so the indices have to be read.
@@ -258,9 +258,16 @@ pub fn cook_texture(texture: &Texture) -> Result<CookedTexture, CookError> {
         }),
         TextureFormat::Bc2 => level
             .data
-            .chunks_exact(16)
+            .as_chunks::<16>()
+            .0
+            .iter()
             .any(|block| block[..8].iter().any(|byte| *byte != 0xFF)),
-        TextureFormat::Rgba8 => level.data.chunks_exact(4).any(|texel| texel[3] != 0xFF),
+        TextureFormat::Rgba8 => level
+            .data
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|texel| texel[3] != 0xFF),
     });
 
     Ok(CookedTexture {
