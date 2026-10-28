@@ -281,7 +281,6 @@ impl WorldPlan {
     }
 
     /// Where to start: the requested cell, or the one the map fills most.
-    #[must_use]
     /// The highest placement in a cell, which is a safe height to frame it from.
     ///
     /// The opening shot used a fixed height above the cell centre. Where the streets are

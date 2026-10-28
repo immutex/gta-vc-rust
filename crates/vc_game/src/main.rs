@@ -275,7 +275,7 @@ fn setup_world(
     if high + 20.0 > start.eye.y {
         let lift = high + 20.0 - start.eye.y;
         start.eye.y += lift;
-        start.target.y += lift * 0.5;
+        start.target.y = lift.mul_add(0.5, start.target.y);
     }
 
     world::spawn(&mut commands, baked, sky.fog_end);
