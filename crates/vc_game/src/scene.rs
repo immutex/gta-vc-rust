@@ -19,7 +19,9 @@ pub fn spawn_sun(commands: &mut Commands<'_, '_>, sky: &Sky) {
         DirectionalLight {
             color: sky.sun,
             illuminance: 10_000.0 * sky.power,
-            shadow_maps_enabled: true,
+            // Diagnostic switch: the world's shade is already baked into its vertex
+            // colours, so shadows can be turned off to see what they were doing.
+            shadow_maps_enabled: std::env::var_os("VC_NO_SHADOWS").is_none(),
             ..DirectionalLight::default()
         },
         // Two cascades over 250 m rather than four over 600: the world is prelit, so
