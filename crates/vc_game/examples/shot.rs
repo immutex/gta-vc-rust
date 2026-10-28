@@ -119,6 +119,7 @@ struct StartShot {
 )]
 fn setup_world(
     mut commands: Commands<'_, '_>,
+    sky: Res<'_, Sky>,
     mut source: ResMut<'_, StreamSource>,
     plan: Res<'_, WorldPlan>,
     colliders: Res<'_, ColliderSet>,
@@ -148,7 +149,7 @@ fn setup_world(
     if let Some(part) = baked.parts.first() {
         println!("first part bounds: {:?}", part.bounds);
     }
-    world::spawn(&mut commands, baked);
+    world::spawn(&mut commands, baked, sky.fog_end);
 }
 
 #[expect(

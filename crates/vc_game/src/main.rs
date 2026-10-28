@@ -182,7 +182,7 @@ fn setup_world(
     );
     stats.0 = baked.stats;
 
-    world::spawn(&mut commands, baked);
+    world::spawn(&mut commands, baked, sky.fog_end);
 
     spawn_water(
         &mut commands,

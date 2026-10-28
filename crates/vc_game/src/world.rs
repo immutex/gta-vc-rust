@@ -14,6 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use bevy::camera::visibility::VisibilityRange;
 use bevy::prelude::*;
 use vc_physics::{Placement as PhysicsPlacement, StaticWorld};
 use vc_render::{Batcher, MaterialCache, Placement, TextureCache};
@@ -216,13 +217,25 @@ pub fn is_lod(model: &str) -> bool {
 }
 
 /// Spawns one baked mesh per part, with blend materials excluded from shadows.
-pub fn spawn(commands: &mut Commands<'_, '_>, baked: BakedWorld) {
+/// Spawns the baked parts, culled beyond `draw_distance`.
+///
+/// The far end is the fog's own range: the map is fully fogged out by then, so
+/// dropping the draw costs nothing on screen and removes everything behind it from
+/// the render and shadow passes.
+pub fn spawn(commands: &mut Commands<'_, '_>, baked: BakedWorld, draw_distance: f32) {
+    let range = VisibilityRange {
+        start_margin: 0.0..0.0,
+        end_margin: draw_distance..draw_distance.mul_add(1.05, 1.0),
+        use_aabb: true,
+    };
+
     for part in baked.parts {
         let mut entity = commands.spawn((
             Mesh3d(part.mesh),
             MeshMaterial3d(part.material),
             part.bounds,
             Transform::IDENTITY,
+            range.clone(),
         ));
         if part.blend {
             entity.insert(bevy::light::NotShadowCaster);
