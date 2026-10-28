@@ -41,6 +41,8 @@ pub struct VcMaterial {
     /// Colour multiplier.
     #[uniform(2)]
     pub tint: LinearRgba,
+    /// Whether to discard cut-out texels.
+    pub cutout: bool,
 }
 
 impl Default for VcMaterial {
@@ -48,6 +50,7 @@ impl Default for VcMaterial {
         Self {
             diffuse: None,
             tint: LinearRgba::WHITE,
+            cutout: false,
         }
     }
 }
@@ -58,12 +61,14 @@ impl Material for VcMaterial {
         SHADER_PATH.into()
     }
 
-    // Opaque for now. Masking looked right in principle - Vice City's foliage and
-    // railings are cut-outs - but forcing it on every material punches holes wherever
-    // a texture's alpha decodes badly, and block-compressed alpha is the least certain
-    // part of the pipeline. Per-texture masking comes back once alpha is trustworthy.
+    // Only textures that actually carry transparency are masked; masking everything
+    // punched holes wherever a texture's alpha happened to be zero.
     fn alpha_mode(&self) -> AlphaMode {
-        AlphaMode::Opaque
+        if self.cutout {
+            AlphaMode::Mask(0.5)
+        } else {
+            AlphaMode::Opaque
+        }
     }
 
     fn specialize(
@@ -201,12 +206,17 @@ pub fn upload_model(
                 .texture
                 .as_ref()
                 .map(|texture| textures.handle(texture, images));
+            let cutout = group
+                .texture
+                .as_ref()
+                .is_some_and(|texture| texture.has_alpha);
 
             parts.push(ModelPart {
                 mesh: meshes.add(built),
                 material: materials.add(VcMaterial {
                     diffuse,
                     tint: LinearRgba::WHITE,
+                    cutout,
                 }),
             });
         }

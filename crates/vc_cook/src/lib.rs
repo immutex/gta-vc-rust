@@ -215,6 +215,9 @@ pub struct CookedTexture {
     pub height: u16,
     /// Levels, largest first.
     pub levels: Vec<Level>,
+    /// Whether the texels actually carry transparency, decided from the data rather
+    /// than from the format, because both block families can be fully opaque.
+    pub has_alpha: bool,
 }
 
 impl CookedTexture {
@@ -237,6 +240,29 @@ pub fn cook_texture(texture: &Texture) -> Result<CookedTexture, CookError> {
         Family::Unclassified => return Err(CookError::UnknownFamily),
     };
 
+    let has_alpha = levels.first().is_some_and(|level| match format {
+        TextureFormat::Bc1 => level.data.chunks_exact(8).any(|block| {
+            // DXT1 carries alpha only in its three-colour mode, where index 3 is
+            // transparent. Endpoint order alone means nothing: shipped art uses the
+            // reversed order even for opaque blocks, so the indices have to be read.
+            let first = u16::from_le_bytes([block[0], block[1]]);
+            let second = u16::from_le_bytes([block[2], block[3]]);
+
+            if first > second {
+                return false;
+            }
+
+            let indices = u32::from_le_bytes([block[4], block[5], block[6], block[7]]);
+
+            (0..16).any(|texel| (indices >> (2 * texel)) & 0b11 == 0b11)
+        }),
+        TextureFormat::Bc2 => level
+            .data
+            .chunks_exact(16)
+            .any(|block| block[..8].iter().any(|byte| *byte != 0xFF)),
+        TextureFormat::Rgba8 => level.data.chunks_exact(4).any(|texel| texel[3] != 0xFF),
+    });
+
     Ok(CookedTexture {
         name: texture.name.clone(),
         mask: texture.mask.clone(),
@@ -244,6 +270,7 @@ pub fn cook_texture(texture: &Texture) -> Result<CookedTexture, CookError> {
         width: texture.width,
         height: texture.height,
         levels,
+        has_alpha,
     })
 }
 

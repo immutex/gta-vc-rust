@@ -12,6 +12,8 @@ pub(crate) fn run() -> Result<()> {
     let mut families: BTreeMap<(u32, u32, u32), u32> = BTreeMap::new();
     let mut alpha_head: BTreeMap<(u8, u8), u32> = BTreeMap::new();
     let mut block_textures = 0;
+    let mut cutouts = 0;
+    let mut total = 0;
 
     for entry in archive.entries() {
         if !entry.has_extension("txd") {
@@ -33,6 +35,11 @@ pub(crate) fn run() -> Result<()> {
             );
             *families.entry(key).or_default() += 1;
 
+            total += 1;
+            if vc_cook::cook_texture(texture).is_ok_and(|cooked| cooked.has_alpha) {
+                cutouts += 1;
+            }
+
             if texture.block_bytes() == Some(16) {
                 block_textures += 1;
                 let head = texture.level_data.get(..2).unwrap_or(&[0, 0]);
@@ -46,7 +53,8 @@ pub(crate) fn run() -> Result<()> {
         println!("  {key:?}: {count}");
     }
 
-    println!("\n16-byte-block textures: {block_textures}");
+    println!("\ntextures needing alpha cutout: {cutouts} of {total}");
+    println!("16-byte-block textures: {block_textures}");
     println!("first two bytes of level 0 (alpha block head), most common:");
     let mut heads: Vec<_> = alpha_head.into_iter().collect();
     heads.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
