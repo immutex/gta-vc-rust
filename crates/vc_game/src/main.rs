@@ -46,11 +46,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     let sky = Sky::load(&root.path().join("data/timecyc.dat"), options.hour)?;
-    // Cells differ a lot in how good a first view they give: the shoreline ones read as a
-    // city floating over water, and the densest are interiors. These were checked by
-    // rendering them.
+    // Cells differ a lot in what they show - much of this map is shoreline and canal, so
+    // several of the busiest ones open over water. Pass a cell to pick another; the overlay
+    // reports which one you are in.
     if options.cell.is_none() {
-        println!("cell 0 1 gives a street view, 1 1 the waterfront, 0 -5 the beach");
+        println!("no cell given: pass one as `-- <x> <y>`; the overlay shows the current cell");
     }
     println!(
         "sky: {} at {}h, fog {:.0}..{:.0}, sun power {:.2}",
