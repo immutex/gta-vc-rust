@@ -41,6 +41,21 @@ pub(crate) fn run(model: &str) -> Result<()> {
             continue;
         }
 
+        let mut min = [f32::INFINITY; 3];
+        let mut max = [f32::NEG_INFINITY; 3];
+        for vertex in &mesh.vertices {
+            for axis in 0..3 {
+                min[axis] = min[axis].min(vertex.position[axis]);
+                max[axis] = max[axis].max(vertex.position[axis]);
+            }
+        }
+        println!(
+            "    extent x {:.1}  y {:.1}  z {:.1}",
+            max[0] - min[0],
+            max[1] - min[1],
+            max[2] - min[2]
+        );
+
         let mut mean = [0.0f64; 5];
         for vertex in &mesh.vertices {
             mean[0] += f64::from(vertex.uv[0][0]);
