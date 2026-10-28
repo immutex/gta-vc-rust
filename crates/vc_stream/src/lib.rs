@@ -112,6 +112,11 @@ impl Streamer {
         }
     }
 
+    /// The archive this streamer reads, for callers that need other assets.
+    pub const fn archive(&self) -> &ImageArchive {
+        &self.archive
+    }
+
     /// Counters describing what has been cooked so far.
     pub fn stats(&self) -> StreamStats {
         self.stats.clone()

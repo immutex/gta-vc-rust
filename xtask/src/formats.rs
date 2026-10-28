@@ -6,7 +6,7 @@ use anyhow::Result;
 use vc_transport::{GameRoot, ImageArchive};
 use vc_txd::Dictionary;
 
-pub(crate) fn run() -> Result<()> {
+pub(crate) fn run(filter: Option<&str>) -> Result<()> {
     let root = GameRoot::from_env()?;
     let archive = ImageArchive::open(&root.image())?;
     let mut families: BTreeMap<(u32, u32, u32), u32> = BTreeMap::new();
@@ -36,8 +36,25 @@ pub(crate) fn run() -> Result<()> {
             *families.entry(key).or_default() += 1;
 
             total += 1;
-            if vc_cook::cook_texture(texture).is_ok_and(|cooked| cooked.has_alpha) {
-                cutouts += 1;
+
+            if let Ok(cooked) = vc_cook::cook_texture(texture) {
+                if cooked.has_alpha {
+                    cutouts += 1;
+                }
+
+                if let Some(needle) = filter
+                    && texture.name.to_ascii_lowercase().contains(needle)
+                {
+                    println!(
+                        "  {:<24} {:?} {}x{} alpha={} mips={}",
+                        texture.name,
+                        cooked.format,
+                        cooked.width,
+                        cooked.height,
+                        cooked.has_alpha,
+                        cooked.levels.len()
+                    );
+                }
             }
 
             if texture.block_bytes() == Some(16) {

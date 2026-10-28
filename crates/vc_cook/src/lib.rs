@@ -158,6 +158,61 @@ impl Scene {
     }
 }
 
+/// Counts texels with alpha below half, and the total counted.
+fn alpha_histogram(level: &Level, format: TextureFormat) -> (usize, usize) {
+    let mut transparent = 0;
+    let mut total = 0;
+
+    match format {
+        TextureFormat::Bc1 => {
+            for block in level.data.as_chunks::<8>().0 {
+                let first = u16::from_le_bytes([block[0], block[1]]);
+                let second = u16::from_le_bytes([block[2], block[3]]);
+
+                // DXT1 has alpha only in its three-colour mode; opaque blocks say
+                // nothing about transparency.
+                if first > second {
+                    continue;
+                }
+
+                let indices = u32::from_le_bytes([block[4], block[5], block[6], block[7]]);
+
+                for texel in 0..16 {
+                    total += 1;
+
+                    if (indices >> (2 * texel)) & 0b11 == 0b11 {
+                        transparent += 1;
+                    }
+                }
+            }
+        }
+        TextureFormat::Bc2 => {
+            for block in level.data.as_chunks::<16>().0 {
+                for byte in &block[..8] {
+                    for nibble in [byte >> 4, byte & 0xF] {
+                        total += 1;
+
+                        if nibble < 8 {
+                            transparent += 1;
+                        }
+                    }
+                }
+            }
+        }
+        TextureFormat::Rgba8 => {
+            for texel in level.data.as_chunks::<4>().0 {
+                total += 1;
+
+                if texel[3] < 128 {
+                    transparent += 1;
+                }
+            }
+        }
+    }
+
+    (transparent, total)
+}
+
 /// Bytes a paletted raster's palette occupies.
 pub const PALETTE_BYTES: usize = 1024;
 
@@ -240,34 +295,13 @@ pub fn cook_texture(texture: &Texture) -> Result<CookedTexture, CookError> {
         Family::Unclassified => return Err(CookError::UnknownFamily),
     };
 
-    let has_alpha = levels.first().is_some_and(|level| match format {
-        TextureFormat::Bc1 => level.data.as_chunks::<8>().0.iter().any(|block| {
-            // DXT1 carries alpha only in its three-colour mode, where index 3 is
-            // transparent. Endpoint order alone means nothing: shipped art uses the
-            // reversed order even for opaque blocks, so the indices have to be read.
-            let first = u16::from_le_bytes([block[0], block[1]]);
-            let second = u16::from_le_bytes([block[2], block[3]]);
+    let has_alpha = levels.first().is_some_and(|level| {
+        let (transparent, total) = alpha_histogram(level, format);
 
-            if first > second {
-                return false;
-            }
-
-            let indices = u32::from_le_bytes([block[4], block[5], block[6], block[7]]);
-
-            (0..16).any(|texel| (indices >> (2 * texel)) & 0b11 == 0b11)
-        }),
-        TextureFormat::Bc2 => level
-            .data
-            .as_chunks::<16>()
-            .0
-            .iter()
-            .any(|block| block[..8].iter().any(|byte| *byte != 0xFF)),
-        TextureFormat::Rgba8 => level
-            .data
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .any(|texel| texel[3] != 0xFF),
+        // A cut-out has a real silhouette: some texels below half and most above. A
+        // handful of stray low bytes is encoder rounding, and treating that as a mask
+        // punches holes in surfaces meant to be solid.
+        total > 0 && transparent * 200 > total && transparent * 100 < total * 95
     });
 
     Ok(CookedTexture {

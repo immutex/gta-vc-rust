@@ -9,8 +9,10 @@ mod census;
 mod cook;
 mod dump;
 mod formats;
+mod models;
 mod physics;
 mod stream;
+mod verify;
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -38,8 +40,26 @@ enum Cmd {
         #[arg(long)]
         verbose: bool,
     },
+    /// List the models a cell places, with cutout and collision status.
+    Models {
+        /// Cell x index.
+        x: i32,
+        /// Cell y index.
+        y: i32,
+    },
+    /// Cross-check a cell's placements against the map's collision data.
+    Verify {
+        /// Cell x index.
+        x: i32,
+        /// Cell y index.
+        y: i32,
+    },
     /// Report the texture format families the install uses.
-    Formats,
+    Formats {
+        /// Only print textures whose name contains this string.
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Build collision for a region and probe the ground.
     Physics {
         /// Cells to load in each direction.
@@ -80,7 +100,9 @@ fn main() -> Result<()> {
         Cmd::Cook { model, txds, out } => cook::run(&model, &txds, out.as_deref()),
         Cmd::Stream { radius } => stream::run(radius),
         Cmd::Physics { radius } => physics::run(radius),
-        Cmd::Formats => formats::run(),
+        Cmd::Formats { name } => formats::run(name.as_deref()),
+        Cmd::Models { x, y } => models::run(x, y),
+        Cmd::Verify { x, y } => verify::run(x, y),
         Cmd::Dump { target, depth } => dump::run(&target, depth),
     }
 }
