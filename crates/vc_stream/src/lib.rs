@@ -555,6 +555,7 @@ impl Colliders {
                         vertices: record.vertex_list,
                         faces: record.face_list,
                         spheres: record.sphere_list,
+                        boxes: record.box_list,
                     },
                 );
             }

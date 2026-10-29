@@ -35,6 +35,9 @@ pub struct Collider {
     pub faces: Vec<Face>,
     /// Spheres.
     pub spheres: Vec<Sphere>,
+    /// Boxes. Vice City keeps a lot of its road and pavement surface in these rather than
+    /// in faces, so a query that only walks triangles finds no ground on those streets.
+    pub boxes: Vec<vc_col::Box3>,
 }
 
 impl Collider {
@@ -220,6 +223,27 @@ impl StaticWorld {
             ) else {
                 continue;
             };
+
+            // A downward ray meets the top of a box, which is where the street is on the
+            // models built from boxes. Without this the player falls through them.
+            for solid in &collider.boxes {
+                let low = placement.transform(solid.min);
+                let high = placement.transform(solid.max);
+                let top = low[2].max(high[2]);
+                let floor = low[2].min(high[2]);
+                let inside = point[0] >= low[0].min(high[0])
+                    && point[0] <= low[0].max(high[0])
+                    && point[1] >= low[1].min(high[1])
+                    && point[1] <= low[1].max(high[1]);
+
+                if inside && point[2] >= top && point[2] - top <= depth {
+                    best = Some(best.map_or(top, |found| found.max(top)));
+                } else if inside && point[2] < top && point[2] >= floor {
+                    // Standing inside the solid: the ceiling is the nearest surface up,
+                    // which at least stops the fall.
+                    best = Some(best.map_or(top, |found| found.max(top)));
+                }
+            }
 
             for face in &collider.faces {
                 let Some(a) = collider.vertices.get(usize::from(face.indices[0])) else {
@@ -416,6 +440,7 @@ mod tests {
                 },
             ],
             spheres: Vec::new(),
+            boxes: Vec::new(),
         }
     }
 
