@@ -596,6 +596,13 @@ and never was: **geometry beyond some distance is not being drawn**, and water o
 because it is close. The camera's far plane is set to 12,000, which is the first thing to check
 against what the renderer actually uses.
 
+**The far plane reads 12,000 and rendering still clips near 1,000.** Measured by bisecting the
+sun's visibility after the fix: it renders at 900 units, is gone at 2,000 and at 4,000, while
+the camera's `Projection` reads `far 12000` in the same frame. So the component is right and
+what the renderer uses is not - the `Frustum` derived from it is stale, or something replaces
+it after `PostStartup`. Printing the camera's `Frustum` (its far plane, not the projection's) is
+the next measurement, and it is one line.
+
 **Stopped here for good**, seven attempts in. The sky is cosmetic; the project has a working
 day-night cycle behind it; and the three durable lessons are recorded: a custom material needs
 the right prepass, `specialize` must leave the vertex layout alone, and a dome does not draw
