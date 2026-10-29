@@ -511,6 +511,27 @@ faults of its own before it worked - a duplicate `Msaa` panic, an HDR camera ren
 an LDR target (a faithful black PNG), and silence about both - and now reads its own output
 back and reports the mean brightness.
 
+### 4.31 The bug behind "everything is sideways": vertices were never converted
+
+Found in the end by the player's own screenshot, after six wrong answers of mine.
+
+`Placement` converted an instance's position and rotation from the game's Z-up frame into
+Bevy's Y-up, and `Batcher` then transformed the model's vertices — which were still in
+Z-up. Every model was therefore placed correctly and *drawn in the wrong basis*: flat
+ground (roads, pavements, terrain) came out standing on edge, buildings lay down. A vertex
+has to take the same axis change as its position:
+
+    world = A·(R·v + t) = (A·R·A⁻¹)·(A·v) + A·t
+
+Verified by rendering two kilometres east of the island: a flat plane to the horizon with
+Downtown upright, where before there were vertical sheets of pavement.
+
+**Why every check missed it.** The texture decode, the DFF UVs, the model extents, the
+instance rotations, the camera basis and the mip chain were each verified correct, and they
+were correct — in model space or in placement space. The fault was in the *composition*
+between those two spaces, which none of those checks looked at. A screenshot of the running
+game was worth more than all of them, and is now the first thing to ask for.
+
 ### 4.30 What actually made the city unreadable: two lighting faults
 
 "Everything is sideways" was reported for weeks and chased as a rotation five times. It was
