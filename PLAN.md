@@ -548,12 +548,19 @@ whole frame, because `StandardMaterial` fogs anything nine kilometres away to th
 So the mesh, the transform, the radius and the visibility are all sound, and the fault is
 **inside `SkyMaterial`** rather than around it.
 
-That narrows the next attempt to three things worth checking in order: whether the material's
-single `#[uniform(0)]` actually reaches the shader (a zeroed uniform makes `debug` zero, so
-the magenta test would fail silently), whether `enable_prepass() -> false` keeps the mesh out
-of extraction, and whether the bind group index matches the shader's `@group(3)` - the water
-material works at 3, so a direct comparison of the two `AsBindGroup` outputs is the cheapest
-check of all.
+A third attempt settled that the uniform is not the problem either: a shader returning
+**constant magenta with no uniform read at all** also fails to appear, on the same mesh that
+draws under `StandardMaterial`.
+
+So `SkyMaterial` is never reaching the screen, whatever its shader says. That puts the fault
+in its registration or extraction - `MaterialPlugin::<SkyMaterial>`, `enable_prepass() ->
+false`, or the material handle on the entity - and **not** in the shader, the mesh, the
+transform or the bind group. The comparison that will find it fastest is the working water
+material alongside it: same plugin shape, same `@group(3)`, one draws and one does not.
+
+Four attempts is where this stops for now. The pieces are small and the remaining question is
+narrow, but each rebuild-and-render cycle here is minutes long, and a feature nobody can see
+does not belong in the tree while it is still open.
 
 ### 4.33 WESL, and four errors that each gave the answer
 
