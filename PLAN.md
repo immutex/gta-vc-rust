@@ -579,9 +579,19 @@ now inside Bevy's own material extraction rather than in our code:
 `MaterialPlugin::<SkyMaterial>` + `NoFrustumCulling` + a 9,000-unit mesh, against a water
 material that differs only in having a texture binding.
 
-Stopped here for good. The sky is cosmetic, the project has a working day-night cycle behind
-it, and the two durable lessons are recorded: custom materials need the right prepass, and
-`specialize` must leave the vertex layout alone.
+A seventh attempt abandoned the custom material entirely and used a **`StandardMaterial`**
+dome - unlit, fog off, vertex-coloured gradient - which is the exact configuration a probe
+proved *does* draw. It spawned (`sky: gradient dome spawned`) and the frame was unchanged.
+
+So a dome spawned from inside `spawn_sky` does not draw even with the material that draws in
+the probe, while a dome spawned inline in the capture's own setup does. The difference is
+somewhere in how that system's commands are applied, not in materials, meshes, transforms or
+shaders - and finding it needs a debugger rather than another render.
+
+**Stopped here for good**, seven attempts in. The sky is cosmetic; the project has a working
+day-night cycle behind it; and the three durable lessons are recorded: a custom material needs
+the right prepass, `specialize` must leave the vertex layout alone, and a dome does not draw
+from `spawn_sky` even when the same material draws inline.
 
 ### 4.33 WESL, and four errors that each gave the answer
 
