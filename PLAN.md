@@ -511,6 +511,27 @@ faults of its own before it worked - a duplicate `Msaa` panic, an HDR camera ren
 an LDR target (a faithful black PNG), and silence about both - and now reads its own output
 back and reports the mean brightness.
 
+### 4.33 WESL, and four errors that each gave the answer
+
+Writing the water shader cost four attempts, and every failure named its own cause once the
+message was read rather than assumed:
+
+| Error | Cause |
+|---|---|
+| `invalid token` | `//!` doc comments - WESL reads them as tokens, not comments |
+| `invalid token at char 0` | `#import` is the old WGSL preprocessor form; WESL takes `import a::b;` |
+| `no shader registered for bevy_pbr::forward_io` | module paths follow the source tree: `bevy_pbr::render::forward_io` |
+| moire pinstripe (visual) | the two sample scales were near 2:1; coprime scales instead |
+
+Shaders live in `crates/vc_game/assets/shaders/`; a copy at the workspace root resolved
+identically, so the crate-local path is the one that matters.
+
+**On the draw count.** 7,901 is the number of *meshes*, not of draw calls: materials are shared
+per texture, so Bevy batches across chunks already. Atlasing would fold *distinct textures*
+into shared pages, and how much that buys cannot be known without measuring actual draw calls
+on the GPU - which needs a frame from the machine with the card. That is the next measurement,
+not the next guess.
+
 ### 4.32 Confirmed in the running game, and what comes next
 
 The axis fix was accepted on the player's own test: the world stands up, and with the
@@ -526,7 +547,7 @@ the world is correct now.
 
 | Item | Why it matters | Where to start |
 |---|---|---|
-| Water that reads as water | the largest single visual gap against a modern frame | a custom `Material` with two scrolling ripple layers, fresnel against the sky and a sun highlight; the shader can be compiled and looked at here with lavapipe |
+| ~~Water that reads as water~~ | **done**: `WaterMaterial` samples the caustic texture at two coprime scales drifting apart, tints toward the timecyc's deep colour and glints on the crests | — |
 | Coplanar road tiles z-fighting | visible seam patterns on the road | find them by rendering a reported cell; offset or merge the losers |
 | Walking collision on some streets | the player can fall through | the ground probe counts lamp posts, so it understates coverage; restrict it to pavement models before believing the number |
 | 7,901 draws | the frame budget | texture atlasing, now safe to attempt because the world is verified |
