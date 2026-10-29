@@ -511,6 +511,26 @@ faults of its own before it worked - a duplicate `Msaa` panic, an HDR camera ren
 an LDR target (a faithful black PNG), and silence about both - and now reads its own output
 back and reports the mean brightness.
 
+### 4.32 Confirmed in the running game, and what comes next
+
+The axis fix was accepted on the player's own test: the world stands up, and with the
+conjugated reading everything sits right, so **conjugated is the default** now. That closes
+the oldest open defect in the project.
+
+Modern post-processing landed with it - 4x MSAA, Natural bloom, gentle depth of field, with
+SSAO and ACES already there - and `VC_NO_AA` exists so its cost can be measured rather than
+assumed.
+
+**Open, in the order worth taking.** None of these is a defect in the loader or the bake;
+the world is correct now.
+
+| Item | Why it matters | Where to start |
+|---|---|---|
+| Water that reads as water | the largest single visual gap against a modern frame | a custom `Material` with two scrolling ripple layers, fresnel against the sky and a sun highlight; the shader can be compiled and looked at here with lavapipe |
+| Coplanar road tiles z-fighting | visible seam patterns on the road | find them by rendering a reported cell; offset or merge the losers |
+| Walking collision on some streets | the player can fall through | the ground probe counts lamp posts, so it understates coverage; restrict it to pavement models before believing the number |
+| 7,901 draws | the frame budget | texture atlasing, now safe to attempt because the world is verified |
+
 ### 4.31 The bug behind "everything is sideways": vertices were never converted
 
 Found in the end by the player's own screenshot, after six wrong answers of mine.
