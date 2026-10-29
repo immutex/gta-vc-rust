@@ -511,6 +511,29 @@ faults of its own before it worked - a duplicate `Msaa` panic, an HDR camera ren
 an LDR target (a faithful black PNG), and silence about both - and now reads its own output
 back and reports the mean brightness.
 
+### 4.34 A day-night cycle, and where the sky dome stands
+
+The hour used to be fixed at startup. A `Clock` now advances it - one game hour per real
+minute by default - and every hour turn rebuilds the row from `timecyc.dat` and carries the
+sun's colour and direction, the ambient fill, the fog's start, end and colour, the water
+tint, and whether the street lights are lit. Checked by rendering: noon is cool daylight on
+cyan water, seventeen hundred is warm gold on the buildings with the sea taking the sunset.
+
+A sky dome was written and **reverted**. It compiled, its mesh was real (1,225 vertices), a
+WESL reserved-word error (`smooth`) was found and fixed, and the render still looked
+unchanged. Two readings are still open and the next attempt should settle them first:
+
+- the dome *was* drawing and its colours were simply close to the clear colour it replaced -
+  the horizon-only frame had a value range of 142..144, which is what a near-uniform sky
+  looks like; or
+- the dome's pipeline was never created, in which case the log says so and the material's
+  bind group is the thing to compare against the water material, which does work at
+  `@group(3)`.
+
+Do not rebuild it before answering that: it is one draw and one shader either way, but the
+difference between "invisible because it works" and "invisible because it never ran" cost a
+long detour already.
+
 ### 4.33 WESL, and four errors that each gave the answer
 
 Writing the water shader cost four attempts, and every failure named its own cause once the
