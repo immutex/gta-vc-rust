@@ -530,9 +530,20 @@ unchanged. Two readings are still open and the next attempt should settle them f
   bind group is the thing to compare against the water material, which does work at
   `@group(3)`.
 
-Do not rebuild it before answering that: it is one draw and one shader either way, but the
-difference between "invisible because it works" and "invisible because it never ran" cost a
-long detour already.
+Answered, and there were **two real bugs** in the second attempt, both found by making the
+dome render magenta under `VC_SKY_DEBUG` and reading the validation errors:
+
+1. `prepass_pipeline`: "Location[3] Float32x3 … not provided by the previous stage outputs".
+   A custom material's prepass needs vertex outputs the material does not provide. The sky
+   needs no prepass, so `enable_prepass() -> false`.
+2. `opaque_mesh_pipeline`: "Location[2] Float32x2 … not provided". The fragment input carries
+   position, normal *and* UV, so a vertex layout of position and normal alone fails
+   validation. The layout needs `ATTRIBUTE_UV_0` at location 2.
+
+With both fixed the pipeline validates and nothing else errors - and the dome is still not
+visible, so the remaining fault is in visibility or extraction rather than the shader. The
+magenta switch is the way to test it: it cannot be confused with the clear colour it
+replaces. That is where the next attempt starts.
 
 ### 4.33 WESL, and four errors that each gave the answer
 
