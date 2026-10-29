@@ -558,9 +558,19 @@ false`, or the material handle on the entity - and **not** in the shader, the me
 transform or the bind group. The comparison that will find it fastest is the working water
 material alongside it: same plugin shape, same `@group(3)`, one draws and one does not.
 
-Four attempts is where this stops for now. The pieces are small and the remaining question is
-narrow, but each rebuild-and-render cycle here is minutes long, and a feature nobody can see
-does not belong in the tree while it is still open.
+A fourth and fifth attempt narrowed it to a single mechanism. With the prepass enabled the
+pipeline fails validation: *"Location[3] Float32x3 … not provided by the previous stage
+outputs"* — the prepass fragment wants an output the vertex stage does not produce. Generated
+tangents (`mesh.generate_tangents()`) do not supply it either.
+
+With the prepass disabled it validates and never draws - which is consistent with the
+renderer extracting opaque materials through the prepass while SSAO is on. So both readings
+point at one thing: **a custom material in this renderer needs a matching prepass vertex
+shader**, not merely `enable_prepass() -> false`. That is the next thing to write, and it is
+a known Bevy pattern rather than a guess about our own code.
+
+Five attempts is where this stops. Each cycle is minutes long and a feature nobody can see
+does not belong in the tree while it is open.
 
 ### 4.33 WESL, and four errors that each gave the answer
 
