@@ -121,7 +121,52 @@ pub(crate) fn run(radius: i32) -> Result<()> {
         }
     }
 
-    println!("ground probes {hits}/{probed} hit");
+    println!("ground probes {hits}/{probed} hit (all collidable models)");
+
+    // The number that matters for walking: road and pavement models. Everything else in the
+    // first count is lamps, signs and props, which legitimately have nothing under their
+    // centre - so the all-models figure understates coverage and says nothing about whether
+    // a street is walkable.
+    let mut walkable_hits = 0;
+    let mut walkable = 0;
+
+    for key in grid.within(start, radius) {
+        for index in grid.instances(key) {
+            let Some(instance) = world.instances.get(*index as usize) else {
+                continue;
+            };
+            let Some(definition) = definitions.get(&instance.definition_id) else {
+                continue;
+            };
+
+            let name = definition.model.to_ascii_lowercase();
+
+            if !["road", "pave", "land", "kerb", "walk"]
+                .iter()
+                .any(|needle| name.contains(needle))
+            {
+                continue;
+            }
+
+            walkable += 1;
+            let probe = [
+                instance.position[0],
+                instance.position[1] + 60.0,
+                instance.position[2],
+            ];
+
+            if physics.ground(probe, 120.0).is_some() {
+                walkable_hits += 1;
+            }
+        }
+    }
+
+    if walkable > 0 {
+        println!(
+            "walkable probes {walkable_hits}/{walkable} hit ({:.0}%)",
+            100.0 * f64::from(walkable_hits) / f64::from(walkable)
+        );
+    }
 
     if !heights.is_empty() {
         let low = heights.iter().copied().fold(f32::INFINITY, f32::min);
