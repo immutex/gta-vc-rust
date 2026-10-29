@@ -103,6 +103,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             Startup,
             (setup_world, setup_lighting, setup_camera, hud::spawn),
         )
+        // PostStartup, not Startup: a projection inserted into the spawn queue is replaced
+        // by the camera's own required component, leaving Bevy's default 1,000-unit far
+        // plane - which clips everything beyond a kilometre, sky included.
+        .add_systems(PostStartup, apply_projection)
         .add_systems(
             Update,
             (
@@ -424,15 +428,25 @@ fn ambient_fill() -> f32 {
         .unwrap_or(3_000.0)
 }
 
+fn apply_projection(mut commands: Commands<'_, '_>, camera: Query<'_, '_, Entity, With<Camera3d>>) {
+    for entity in &camera {
+        commands.entity(entity).insert(scene::world_projection());
+    }
+    println!("camera: far plane 12000");
+}
+
 #[expect(
     clippy::needless_pass_by_value,
     reason = "Bevy system parameters are taken by value by design"
 )]
 fn setup_camera(mut commands: Commands<'_, '_>, sky: Res<'_, Sky>, shot: Res<'_, StartShot>) {
-    commands.spawn(scene::world_camera(
-        shot.eye,
-        shot.target,
-        &sky,
-        Camera::default(),
-    ));
+    let camera = commands
+        .spawn(scene::world_camera(
+            shot.eye,
+            shot.target,
+            &sky,
+            Camera::default(),
+        ))
+        .id();
+    commands.entity(camera).insert(scene::world_projection());
 }

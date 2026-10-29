@@ -911,10 +911,10 @@ pub fn spawn_sun_disc(
 pub struct SunDisc;
 
 /// How far along the sun's direction the disc sits.
-const SUN_DISTANCE: f32 = 7_500.0;
+const SUN_DISTANCE: f32 = 850.0;
 
 /// Radius of the disc at that distance, which reads as roughly half a degree.
-const SUN_RADIUS: f32 = 260.0;
+const SUN_RADIUS: f32 = 26.0;
 
 /// Places the disc where the sun is.
 pub fn place_sun_disc(disc: &mut Transform, sky: &Sky) {

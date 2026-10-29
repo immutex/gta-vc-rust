@@ -70,6 +70,20 @@ pub fn spawn_sun(commands: &mut Commands<'_, '_>, sky: &Sky) {
     });
 }
 
+/// The projection the world camera needs.
+///
+/// Inserted on the camera entity rather than bundled with it: `Camera3d` already requires a
+/// `Projection`, and a copy inside the spawn bundle loses to it, leaving Bevy's default far
+/// plane of 1,000 units - which silently clips the sun, the sky and the far half of the city.
+#[must_use]
+pub fn world_projection() -> Projection {
+    Projection::Perspective(PerspectiveProjection {
+        near: 0.1,
+        far: 12_000.0,
+        ..PerspectiveProjection::default()
+    })
+}
+
 /// The world camera: HDR, the timecyc's fog and the opening orientation.
 ///
 /// The `Camera` component is a parameter because the offscreen capture renders to an
@@ -117,11 +131,6 @@ pub fn world_camera(eye: Vec3, target: Vec3, sky: &Sky, camera: Camera) -> impl 
             aperture_f_stops: 0.25,
             ..DepthOfField::default()
         },
-        Projection::from(PerspectiveProjection {
-            near: 0.1,
-            far: 12_000.0,
-            ..PerspectiveProjection::default()
-        }),
         DistanceFog {
             color: sky.clear,
             falloff: FogFalloff::Linear {

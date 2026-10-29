@@ -105,6 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     .init_resource::<TextureCache>()
     .init_resource::<MaterialCache>()
     .add_systems(Startup, (setup_world, setup_sun, setup_camera))
+    .add_systems(PostStartup, apply_projection)
     .add_systems(Update, capture);
 
     app.run();
@@ -256,6 +257,12 @@ fn setup_camera(
         })),
         Transform::from_translation(shot.target + Vec3::Y * 10.0),
     ));
+}
+
+fn apply_projection(mut commands: Commands<'_, '_>, camera: Query<'_, '_, Entity, With<Camera3d>>) {
+    for entity in &camera {
+        commands.entity(entity).insert(scene::world_projection());
+    }
 }
 
 #[expect(
