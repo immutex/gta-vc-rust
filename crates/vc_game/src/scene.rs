@@ -6,6 +6,8 @@ use bevy::light::CascadeShadowConfigBuilder;
 use bevy::pbr::{
     DistanceFog, FogFalloff, ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel,
 };
+use bevy::post_process::bloom::Bloom;
+use bevy::post_process::dof::DepthOfField;
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
 
@@ -75,12 +77,27 @@ pub fn world_camera(eye: Vec3, target: Vec3, sky: &Sky, camera: Camera) -> impl 
         Hdr,
         Tonemapping::AcesFitted,
         DebandDither::Enabled,
-        // The city is dense, angular geometry, which is exactly what contact occlusion
-        // is for; MSAA off pays for it at 1080p.
-        Msaa::Off,
+        // Four samples. The city is all thin edges - railings, wires, palm fronds - and
+        // without it they crawl badly as the camera moves.
+        if std::env::var_os("VC_NO_AA").is_some() {
+            Msaa::Off
+        } else {
+            Msaa::Sample4
+        },
+        // Contact occlusion: the city is dense angular geometry, which is what it is for.
         ScreenSpaceAmbientOcclusion {
             quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
             ..ScreenSpaceAmbientOcclusion::default()
+        },
+        // Light bleeding from the sky and the street lights. Natural is the subtle of
+        // Bevy's presets; anything stronger fogs the whole skyline.
+        Bloom::NATURAL,
+        // Depth of field, kept gentle: the far skyline softens, the street does not.
+        DepthOfField {
+            focal_distance: 80.0,
+            sensor_height: 0.015,
+            aperture_f_stops: 0.25,
+            ..DepthOfField::default()
         },
         Projection::from(PerspectiveProjection {
             near: 0.1,

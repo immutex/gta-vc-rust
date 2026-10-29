@@ -383,13 +383,12 @@ fn corrected(instance: &Instance, sense: Sense) -> Instance {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Resource)]
 pub enum Sense {
     /// Apply the quaternion as authored.
-    ///
-    /// The default, because it is the literal reading of the file and because the
-    /// wrapped geometry of signs and shop fronts reads better under it by eye - the one
-    /// measurement that outranks a statistic. `R` flips to the other.
-    #[default]
     Stored,
-    /// Apply its conjugate, the reading the lamp-arm test prefers.
+    /// Apply its conjugate.
+    ///
+    /// The default, checked in the running game: with the axis bug fixed, this reading
+    /// places everything correctly. `R` flips to the other for comparison.
+    #[default]
     Conjugated,
 }
 
