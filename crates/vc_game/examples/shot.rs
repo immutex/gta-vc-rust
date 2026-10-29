@@ -162,6 +162,7 @@ fn setup_world(
     if let Some(part) = baked.parts.first() {
         println!("first part bounds: {:?}", part.bounds);
     }
+    world::spawn_sun_disc(&mut commands, &mut meshes, &mut standard, &sky);
     world::spawn(&mut commands, baked, sky.fog_end);
 
     // The capture draws the sea too. Without it a shoreline cell renders as clear colour,

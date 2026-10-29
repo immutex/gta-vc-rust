@@ -207,6 +207,7 @@ fn flip_sense(
         &mut standard,
         &mut images,
     );
+    world::spawn_sun_disc(&mut commands, &mut meshes, &mut standard, &sky);
     world::spawn(&mut commands, baked, sky.fog_end);
 }
 
@@ -360,8 +361,9 @@ fn setup_lighting(mut commands: Commands<'_, '_>, sky: Res<'_, Sky>) {
 /// An hour of game time per minute of real time by default, `VC_TIME_SCALE` to change the
 /// pace and `VC_TIME_PAUSED` to hold the hour still.
 #[expect(
+    clippy::too_many_arguments,
     clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value by design"
+    reason = "each argument is a distinct resource the clock drives; Bevy passes them by value"
 )]
 fn advance_clock(
     time: Res<'_, Time>,
@@ -371,6 +373,7 @@ fn advance_clock(
     mut ambient: ResMut<'_, GlobalAmbientLight>,
     mut sun: Query<'_, '_, (&mut DirectionalLight, &mut Transform), With<scene::SunLight>>,
     mut camera: Query<'_, '_, &mut DistanceFog>,
+    mut disc: Query<'_, '_, &mut Transform, With<world::SunDisc>>,
 ) {
     if std::env::var_os("VC_TIME_PAUSED").is_some() {
         return;
@@ -394,6 +397,10 @@ fn advance_clock(
 
     for (mut light, mut transform) in &mut sun {
         scene::place_sun(&mut light, &mut transform, &fresh);
+    }
+
+    for mut transform in &mut disc {
+        world::place_sun_disc(&mut transform, &fresh);
     }
 
     // Fog follows the hour too: dawn and dusk pull it in, noon pushes it out.

@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use bevy::camera::visibility::VisibilityRange;
+use bevy::camera::visibility::{NoFrustumCulling, VisibilityRange};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use vc_physics::{Placement as PhysicsPlacement, StaticWorld};
@@ -854,6 +854,72 @@ fn collect(directory: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn Error
     }
 
     Ok(())
+}
+
+/// Spawns the sun as a small unlit sphere far along the sun's direction.
+///
+/// A shader dome would be the elegant way; this is the way that draws, and the sun is a
+/// disc whether it comes from a shader or from geometry at that distance.
+pub fn spawn_sun_disc(
+    commands: &mut Commands<'_, '_>,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    sky: &Sky,
+) -> Entity {
+    let colour = sky.sun.to_linear();
+    let material = materials.add(StandardMaterial {
+        base_color: Color::srgb(
+            (colour.red * 1.4).min(1.0),
+            (colour.green * 1.4).min(1.0),
+            (colour.blue * 1.4).min(1.0),
+        ),
+        emissive: LinearRgba::new(
+            colour.red * 30.0,
+            colour.green * 30.0,
+            colour.blue * 30.0,
+            1.0,
+        ),
+        unlit: true,
+        fog_enabled: false,
+        ..StandardMaterial::default()
+    });
+
+    let entity = commands
+        .spawn((
+            Mesh3d(
+                meshes.add(
+                    Sphere::new(SUN_RADIUS)
+                        .mesh()
+                        .ico(2)
+                        .unwrap_or_else(|_| Sphere::new(SUN_RADIUS).mesh().uv(16, 8)),
+                ),
+            ),
+            MeshMaterial3d(material),
+            Transform::from_translation(sky.sun_direction() * SUN_DISTANCE),
+            NotShadowCaster,
+            NoFrustumCulling,
+            SunDisc,
+        ))
+        .id();
+
+    println!("sun: disc spawned");
+
+    entity
+}
+
+/// Marks the sun's disc, so the clock can move it.
+#[derive(Component)]
+pub struct SunDisc;
+
+/// How far along the sun's direction the disc sits.
+const SUN_DISTANCE: f32 = 7_500.0;
+
+/// Radius of the disc at that distance, which reads as roughly half a degree.
+const SUN_RADIUS: f32 = 60.0;
+
+/// Places the disc where the sun is.
+pub fn place_sun_disc(disc: &mut Transform, sky: &Sky) {
+    *disc = Transform::from_translation(sky.sun_direction() * SUN_DISTANCE);
 }
 
 /// The ocean: one quad at the height and extent `water.dat` specifies, in Bevy axes.
