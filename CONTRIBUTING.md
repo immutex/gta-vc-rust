@@ -26,6 +26,15 @@ $env:VC_GAME_ROOT = "C:\path\to\Grand Theft Auto Vice City"
 cargo run --release
 ```
 
+The gate compiles and tests but does not *run* the app, so a system that panics on startup
+reaches players unnoticed. Boot it for one frame as well — in WSL, lavapipe provides the Vulkan
+driver:
+
+```bash
+export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
+./scripts/smoke.sh
+```
+
 Enable the commit-message hook once per clone:
 
 ```bash

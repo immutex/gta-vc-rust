@@ -16,6 +16,7 @@
 | Format | `cargo fmt --all` |
 | Licence and duplicate check | `cargo deny check` |
 | Install census (needs game data) | `cargo xtask census --verify` |
+| Boot the runtime and fail on a panic | `./scripts/smoke.sh` |
 
 ## External References
 | Need | File |
