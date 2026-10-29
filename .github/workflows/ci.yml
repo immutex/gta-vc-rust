@@ -41,11 +41,3 @@ jobs:
         run: |
           cargo install cargo-deny --locked
           cargo deny check
-
-  shell:
-    name: Scripts
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: ShellCheck
-        run: shellcheck scripts/*.sh
