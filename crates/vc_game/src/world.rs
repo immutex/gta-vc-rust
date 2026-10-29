@@ -236,6 +236,19 @@ impl WorldPlan {
             instances.push(corrected(instance, sense));
         }
 
+        if std::env::var_os("VC_REPORT_ISLANDS").is_some() {
+            for instance in &instances {
+                if let Some(definition) = definitions.get(&instance.definition_id)
+                    && definition.model.to_ascii_lowercase().contains("island")
+                {
+                    println!(
+                        "plan holds island: {} id {}",
+                        definition.model, instance.definition_id
+                    );
+                }
+            }
+        }
+
         let mut chunks: BTreeMap<ChunkKey, Vec<u32>> = BTreeMap::new();
         for (index, instance) in instances.iter().enumerate() {
             chunks
@@ -381,6 +394,16 @@ pub enum Sense {
 }
 
 impl Sense {
+    /// Reads the sense from `VC_SENSE` when set, for comparing the two in one run.
+    #[must_use]
+    pub fn from_env() -> Self {
+        match std::env::var("VC_SENSE").ok().as_deref() {
+            Some("stored") => Self::Stored,
+            Some("conjugated") => Self::Conjugated,
+            _ => Self::default(),
+        }
+    }
+
     /// The other reading.
     #[must_use]
     pub const fn flipped(self) -> Self {

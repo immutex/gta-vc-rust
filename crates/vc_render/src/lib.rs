@@ -87,9 +87,14 @@ impl Placement {
             reciprocal(self.scale.z),
         );
 
+        // The vertex has to take the same axis change the position did. Rotating only the
+        // instance leaves every model in the game's Z-up frame, so flat ground ends up
+        // standing on edge while the world around it looks almost right.
+        let axes = to_bevy_axes();
+
         (
-            self.translation + self.rotation * (position * self.scale),
-            (self.rotation * (normal * inverse)).normalize_or_zero(),
+            self.translation + self.rotation * (axes * (position * self.scale)),
+            (self.rotation * (axes * (normal * inverse))).normalize_or_zero(),
         )
     }
 }
@@ -672,7 +677,8 @@ mod tests {
         assert!((east - Vec3::new(0.0, 0.0, -1.0)).length() < 1e-5, "{east}");
     }
 
-    /// A quad whose texture coordinates follow the geometry: `u` along x, `v` along z.
+    /// A quad whose texture coordinates follow the geometry: `u` along the game's x and
+    /// `v` along its z, which after the axis change is Bevy's -y.
     fn oriented_quad() -> vc_stream::CookedModel {
         let corner = |position: [f32; 3], uv: [f32; 2]| vc_cook::SceneVertex {
             position,
@@ -728,8 +734,9 @@ mod tests {
 
         // The two ends of the diagonal in x must differ in u and match in v.
         for (uv, position) in uvs.iter().zip(positions) {
+            // The quad's own height is the game's z, which the axis change puts on Bevy's y.
             let expected_u = position[0] / 4.0;
-            let expected_v = position[2] / 3.0;
+            let expected_v = position[1] / 3.0;
 
             assert!(
                 (uv[0] - expected_u).abs() < 1e-4,

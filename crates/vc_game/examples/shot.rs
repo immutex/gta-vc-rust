@@ -64,7 +64,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let _ = streamer.warm_textures();
 
     let (world, effects) = world::load(&root.path().join("data/maps"))?;
-    let plan = WorldPlan::new(world, &effects, vc_game::world::Sense::default());
+    let plan = WorldPlan::new(world, &effects, vc_game::world::Sense::from_env());
     let sky = Sky::load(&root.path().join("data/timecyc.dat"), hour)?;
     let colliders = Colliders::load(streamer.archive());
     let start = plan.start(cell_x.zip(cell_y).map(|(x, y)| vc_world::CellKey { x, y }));
@@ -164,15 +164,17 @@ fn setup_world(
     // The capture draws the sea too. Without it a shoreline cell renders as clear colour,
     // which is indistinguishable from missing ground - the reason three of these frames
     // were misread.
-    world::spawn_water(
-        &mut commands,
-        &mut source.0,
-        &mut textures,
-        &mut standard,
-        &mut meshes,
-        &mut images,
-        &sky,
-    );
+    if std::env::var_os("VC_NO_WATER").is_none() {
+        world::spawn_water(
+            &mut commands,
+            &mut source.0,
+            &mut textures,
+            &mut standard,
+            &mut meshes,
+            &mut images,
+            &sky,
+        );
+    }
 }
 
 /// Reads a point from the environment, spelled `x,y,z`.

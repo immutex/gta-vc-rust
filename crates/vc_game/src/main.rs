@@ -13,6 +13,7 @@ use vc_stream::{Colliders, Streamer};
 use vc_transport::{GameRoot, ImageArchive};
 use vc_world::CellKey;
 
+use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use vc_game::camera::{FlyCam, Physics, Player};
 use vc_game::hud::{self, Stats};
 use vc_game::scene;
@@ -33,7 +34,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("textures: {indexed} indexed");
 
     let (world, effects) = world::load(&root.path().join("data/maps"))?;
-    let sense = world::Sense::default();
+    let sense = world::Sense::from_env();
     println!("rotation sense: {}", sense.label());
     let plan = WorldPlan::new(world.clone(), &effects, sense);
     println!(
@@ -96,6 +97,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             (
                 vc_game::camera::look,
                 world::update_lights,
+                grab_frame,
                 flip_sense,
                 vc_game::camera::fly,
                 vc_game::camera::walk,
@@ -106,6 +108,39 @@ fn main() -> Result<(), Box<dyn Error>> {
         .run();
 
     Ok(())
+}
+
+/// Writes what the player is looking at to `shot-<x>-<y>.png` on F12.
+///
+/// The offscreen capture frames a fixed view; this frames *theirs*, which is what a report
+/// about a specific surface needs - the camera, the place and whatever is in front of it.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are taken by value by design"
+)]
+fn grab_frame(
+    mut commands: Commands<'_, '_>,
+    keys: Res<'_, ButtonInput<KeyCode>>,
+    camera: Query<'_, '_, &GlobalTransform, With<vc_game::camera::FlyCamMarker>>,
+    grid: Res<'_, StartCell>,
+) {
+    if !keys.just_pressed(KeyCode::F12) {
+        return;
+    }
+
+    let at = camera
+        .single()
+        .map(GlobalTransform::translation)
+        .unwrap_or_default();
+    let cell = CellKey::of([at.x, -at.z, at.y], vc_world::CELL_SIZE);
+    let path = format!("shot-{}-{}.png", cell.x, cell.y);
+
+    println!("capturing {path}");
+    commands
+        .spawn(Screenshot::primary_window())
+        .observe(save_to_disk(path));
+
+    let _ = grid;
 }
 
 /// Re-bakes the world under the other rotation sense when R is pressed.
