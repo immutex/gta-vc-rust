@@ -73,6 +73,8 @@ pub struct WorldPlan {
     pub dropped_interior: usize,
     /// Placements dropped because their definition is missing.
     pub dropped_unknown: usize,
+    /// Placements dropped as exact duplicates of another placement.
+    pub dropped_duplicate: usize,
     /// Authored lights over the roads, in world space.
     pub lights: Vec<LightPoint>,
 }
@@ -249,6 +251,46 @@ impl WorldPlan {
             }
         }
 
+        // Two placements of the same model within a few centimetres draw the same surface
+        // twice, and the two fight for the same depth - which reads as a shimmering,
+        // doubled texture on exactly the road tiles that have it. The map carries a
+        // handful of these; keep the first.
+        let mut kept: Vec<u32> = Vec::with_capacity(instances.len());
+        let mut dropped_duplicate = 0;
+
+        'outer: for index in 0..instances.len() {
+            let Some(instance) = instances.get(index).cloned() else {
+                continue;
+            };
+
+            for earlier in &kept {
+                let Some(other) = instances.get(*earlier as usize) else {
+                    continue;
+                };
+
+                if other.definition_id != instance.definition_id {
+                    continue;
+                }
+
+                let close = (instance.position[0] - other.position[0]).abs() < 0.05
+                    && (instance.position[1] - other.position[1]).abs() < 0.05
+                    && (instance.position[2] - other.position[2]).abs() < 0.05;
+
+                if close {
+                    dropped_duplicate += 1;
+
+                    continue 'outer;
+                }
+            }
+
+            kept.push(index as u32);
+        }
+
+        let instances: Vec<Instance> = kept
+            .iter()
+            .filter_map(|index| instances.get(*index as usize).cloned())
+            .collect();
+
         let mut chunks: BTreeMap<ChunkKey, Vec<u32>> = BTreeMap::new();
         for (index, instance) in instances.iter().enumerate() {
             chunks
@@ -289,6 +331,7 @@ impl WorldPlan {
             dropped_lod,
             dropped_interior,
             dropped_unknown,
+            dropped_duplicate,
             lights,
         }
     }

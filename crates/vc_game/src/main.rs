@@ -38,10 +38,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("rotation sense: {}", sense.label());
     let plan = WorldPlan::new(world.clone(), &effects, sense);
     println!(
-        "world: {} placements ({} LOD, {} interior, {} unknown dropped)",
+        "world: {} placements ({} LOD, {} interior, {} duplicate, {} unknown dropped)",
         plan.instances.len(),
         plan.dropped_lod,
         plan.dropped_interior,
+        plan.dropped_duplicate,
         plan.dropped_unknown,
     );
 
