@@ -1,5 +1,6 @@
 //! Camera and lighting setup shared by the game and the offscreen capture.
 
+use bevy::anti_alias::fxaa::Fxaa;
 use bevy::camera::Hdr;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::light::CascadeShadowConfigBuilder;
@@ -77,12 +78,15 @@ pub fn world_camera(eye: Vec3, target: Vec3, sky: &Sky, camera: Camera) -> impl 
         Hdr,
         Tonemapping::AcesFitted,
         DebandDither::Enabled,
-        // Four samples. The city is all thin edges - railings, wires, palm fronds - and
-        // without it they crawl badly as the camera moves.
-        if std::env::var_os("VC_NO_AA").is_some() {
-            Msaa::Off
-        } else {
-            Msaa::Sample4
+        // SSAO and MSAA cannot coexist in this renderer - occlusion needs a resolved depth
+        // buffer - so the antialiasing is FXAA, which works with it. The city is all thin
+        // edges, and without either they crawl badly as the camera moves.
+        Msaa::Off,
+        // FXAA rather than MSAA, so it can run alongside the occlusion pass. Switched off
+        // by `VC_NO_AA` when measuring what it costs.
+        Fxaa {
+            enabled: std::env::var_os("VC_NO_AA").is_none(),
+            ..Fxaa::default()
         },
         // Contact occlusion: the city is dense angular geometry, which is what it is for.
         ScreenSpaceAmbientOcclusion {
