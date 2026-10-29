@@ -576,7 +576,7 @@ it has always drawn. With the override removed the validation error is gone enti
 
 The dome still does not appear. Six attempts, each narrowing it, and the remaining question is
 now inside Bevy's own material extraction rather than in our code:
-`Mat6orialPlugin::<SkyMaterial>` + `NoFrustumCulling` + a 9,000-unit mesh, against a water
+`MaterialPlugin::<SkyMaterial>` + `NoFrustumCulling` + a 9,000-unit mesh, against a water
 material that differs only in having a texture binding.
 
 Stopped here for good. The sky is cosmetic, the project has a working day-night cycle behind
