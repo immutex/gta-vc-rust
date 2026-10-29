@@ -540,10 +540,20 @@ dome render magenta under `VC_SKY_DEBUG` and reading the validation errors:
    position, normal *and* UV, so a vertex layout of position and normal alone fails
    validation. The layout needs `ATTRIBUTE_UV_0` at location 2.
 
-With both fixed the pipeline validates and nothing else errors - and the dome is still not
-visible, so the remaining fault is in visibility or extraction rather than the shader. The
-magenta switch is the way to test it: it cannot be confused with the clear colour it
-replaces. That is where the next attempt starts.
+With both fixed the pipeline validates, nothing errors, and the dome still does not appear.
+
+**A probe settled where the fault is not.** A plain `StandardMaterial` sphere of the same
+radius, same mesh, same transform, spawned by the same system, *does* draw - it dims the
+whole frame, because `StandardMaterial` fogs anything nine kilometres away to the fog colour.
+So the mesh, the transform, the radius and the visibility are all sound, and the fault is
+**inside `SkyMaterial`** rather than around it.
+
+That narrows the next attempt to three things worth checking in order: whether the material's
+single `#[uniform(0)]` actually reaches the shader (a zeroed uniform makes `debug` zero, so
+the magenta test would fail silently), whether `enable_prepass() -> false` keeps the mesh out
+of extraction, and whether the bind group index matches the shader's `@group(3)` - the water
+material works at 3, so a direct comparison of the two `AsBindGroup` outputs is the cheapest
+check of all.
 
 ### 4.33 WESL, and four errors that each gave the answer
 
