@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use bevy::camera::visibility::{NoFrustumCulling, VisibilityRange};
+use bevy::camera::visibility::VisibilityRange;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use vc_physics::{Placement as PhysicsPlacement, StaticWorld};
@@ -897,7 +897,6 @@ pub fn spawn_sun_disc(
             MeshMaterial3d(material),
             Transform::from_translation(sky.sun_direction() * SUN_DISTANCE),
             NotShadowCaster,
-            NoFrustumCulling,
             SunDisc,
         ))
         .id();

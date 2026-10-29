@@ -588,6 +588,14 @@ the probe, while a dome spawned inline in the capture's own setup does. The diff
 somewhere in how that system's commands are applied, not in materials, meshes, transforms or
 shaders - and finding it needs a debugger rather than another render.
 
+**A mistake in the probe.** The probe sphere that "drew" was a 9,000-radius sphere centred at
+the origin - the camera was **inside** it, so what it proved is that the inside of a huge sphere
+renders, not that distant geometry does. An inline debug sun at 7,500 units, aimed dead centre
+with a magenta unlit material, does not render at all. So the open question is not the material
+and never was: **geometry beyond some distance is not being drawn**, and water only works
+because it is close. The camera's far plane is set to 12,000, which is the first thing to check
+against what the renderer actually uses.
+
 **Stopped here for good**, seven attempts in. The sky is cosmetic; the project has a working
 day-night cycle behind it; and the three durable lessons are recorded: a custom material needs
 the right prepass, `specialize` must leave the vertex layout alone, and a dome does not draw
