@@ -4,6 +4,7 @@
 
 **Vice City's assets. A 2026 engine.**
 
+[![CI](https://img.shields.io/github/actions/workflow/status/immutex/gta-vc-rust/ci.yml?branch=main&style=flat-square&label=CI)](../../actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square)](LICENSE-MIT)
 [![Rust](https://img.shields.io/badge/rust-1.99.1-orange?style=flat-square)](rust-toolchain.toml)
 [![Platform](https://img.shields.io/badge/platform-Windows%20(D3D12)%20%C2%B7%20Linux%20(Vulkan)-lightgrey?style=flat-square)](#requirements)
