@@ -496,6 +496,8 @@ pub struct ActiveLights {
     entities: Vec<Entity>,
     centre: Vec3,
     spawned: bool,
+    /// Whether these were spawned for night, so a change of hour rebuilds them.
+    night: bool,
 }
 
 impl ActiveLights {
@@ -547,6 +549,7 @@ pub fn update_lights(
 
     active.centre = centre;
     active.spawned = true;
+    active.night = night;
 
     if !night {
         return;

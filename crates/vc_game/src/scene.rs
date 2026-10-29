@@ -16,9 +16,23 @@ use crate::camera::FlyCamMarker;
 use crate::sky::Sky;
 
 /// Spawns the sun and the sky fill for one hour.
+/// Marks the sun, so the clock can move it.
+#[derive(Component)]
+pub struct SunLight;
+
+/// Places the sun where the timecyc puts it for the hour.
+pub fn place_sun(light: &mut DirectionalLight, transform: &mut Transform, sky: &Sky) {
+    light.color = sky.sun;
+    light.illuminance = 10_000.0 * sky.power;
+    *transform =
+        Transform::from_rotation(Quat::from_rotation_arc(Vec3::NEG_Z, -sky.sun_direction()));
+}
+
+/// Spawns the sun, with its shadow cascades.
 pub fn spawn_sun(commands: &mut Commands<'_, '_>, sky: &Sky) {
     let direction = sky.sun_direction();
     commands.spawn((
+        SunLight,
         DirectionalLight {
             color: sky.sun,
             illuminance: 10_000.0 * sky.power,

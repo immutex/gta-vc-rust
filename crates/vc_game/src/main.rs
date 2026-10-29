@@ -90,6 +90,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         .init_resource::<world::ActiveLights>()
         .insert_resource(RawWorld(world))
         .insert_resource(sense)
+        .insert_resource(Clock {
+            table: vc_game::sky::read(&root.path().join("data/timecyc.dat"))?,
+            hour: options.hour as f32,
+            speed: std::env::var("VC_TIME_SCALE")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .unwrap_or(1.0 / 60.0),
+        })
         .insert_resource(Effects(effects))
         .add_systems(
             Startup,
@@ -99,6 +107,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Update,
             (
                 vc_game::camera::look,
+                advance_clock,
                 world::update_lights,
                 grab_frame,
                 flip_sense,
@@ -225,6 +234,14 @@ struct ColliderSet(Colliders);
 #[derive(Resource)]
 struct Effects(Vec<vc_world::Effect>);
 
+/// The world clock, driving the timecyc and everything downstream of it.
+#[derive(Resource)]
+struct Clock {
+    table: vc_timecyc::Timecycle,
+    hour: f32,
+    speed: f32,
+}
+
 /// The cell the opening shot is framed on.
 #[derive(Resource, Clone, Copy)]
 struct StartCell(CellKey);
@@ -336,6 +353,68 @@ fn setup_world(
 )]
 fn setup_lighting(mut commands: Commands<'_, '_>, sky: Res<'_, Sky>) {
     scene::spawn_sun(&mut commands, &sky);
+}
+
+/// Advances the world clock and carries every light with it.
+///
+/// An hour of game time per minute of real time by default, `VC_TIME_SCALE` to change the
+/// pace and `VC_TIME_PAUSED` to hold the hour still.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are taken by value by design"
+)]
+fn advance_clock(
+    time: Res<'_, Time>,
+    mut clock: ResMut<'_, Clock>,
+    mut sky: ResMut<'_, Sky>,
+    mut clear: ResMut<'_, ClearColor>,
+    mut ambient: ResMut<'_, GlobalAmbientLight>,
+    mut sun: Query<'_, '_, (&mut DirectionalLight, &mut Transform), With<scene::SunLight>>,
+    mut camera: Query<'_, '_, &mut DistanceFog>,
+) {
+    if std::env::var_os("VC_TIME_PAUSED").is_some() {
+        return;
+    }
+
+    let before = clock.hour.floor() as usize;
+    clock.hour = time.delta_secs().mul_add(clock.speed, clock.hour) % 24.0;
+    let after = clock.hour.floor() as usize;
+
+    if before == after {
+        return;
+    }
+
+    let Ok(fresh) = Sky::at(&clock.table, after) else {
+        return;
+    };
+
+    clear.0 = fresh.clear;
+    ambient.color = fresh.ambient;
+    ambient.brightness = ambient_fill() * fresh.power;
+
+    for (mut light, mut transform) in &mut sun {
+        scene::place_sun(&mut light, &mut transform, &fresh);
+    }
+
+    // Fog follows the hour too: dawn and dusk pull it in, noon pushes it out.
+    for mut fog in &mut camera {
+        fog.color = fresh.clear;
+        fog.falloff = FogFalloff::Linear {
+            start: fresh.fog_start,
+            end: fresh.fog_end,
+        };
+    }
+
+    *sky = fresh;
+    println!("hour {}: {:?}", sky.hour, sky.weather);
+}
+
+/// The ambient fill, with `VC_AMBIENT` to tune it.
+fn ambient_fill() -> f32 {
+    std::env::var("VC_AMBIENT")
+        .ok()
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(3_000.0)
 }
 
 #[expect(

@@ -50,8 +50,14 @@ impl Sky {
     /// Returns an error when the file cannot be read, does not parse, or does not
     /// hold the requested hour.
     pub fn load(path: &Path, hour: usize) -> Result<Self, Box<dyn Error>> {
-        let text = String::from_utf8_lossy(&fs::read(path)?).into_owned();
-        let table = Timecycle::parse(&text)?;
+        Self::at(&read(path)?, hour)
+    }
+
+    /// The hour's row of the first weather type.
+    ///
+    /// # Errors
+    /// Returns an error when the table holds no weather, or no such hour.
+    pub fn at(table: &Timecycle, hour: usize) -> Result<Self, Box<dyn Error>> {
         let weather = table
             .weathers
             .first()
@@ -93,6 +99,16 @@ impl Sky {
 
         to_bevy_position(game)
     }
+}
+
+/// Reads the timecyc table, for a clock that advances through it.
+///
+/// # Errors
+/// Returns an error when the file cannot be read or does not parse.
+pub fn read(path: &Path) -> Result<Timecycle, Box<dyn Error>> {
+    let text = String::from_utf8_lossy(&fs::read(path)?).into_owned();
+
+    Ok(Timecycle::parse(&text)?)
 }
 
 /// Timecyc colours are 0..255 values, authored for an 8-bit framebuffer.
