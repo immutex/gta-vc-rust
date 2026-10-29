@@ -569,8 +569,19 @@ point at one thing: **a custom material in this renderer needs a matching prepas
 shader**, not merely `enable_prepass() -> false`. That is the next thing to write, and it is
 a known Bevy pattern rather than a guess about our own code.
 
-Five attempts is where this stops. Each cycle is minutes long and a feature nobody can see
-does not belong in the tree while it is open.
+A sixth attempt fixed the prepass cleanly - **`specialize` must not overwrite
+`descriptor.vertex.buffers`**, because it runs for the prepass pipeline too and strips
+attributes that pass still expects; the water material never touches the layout, which is why
+it has always drawn. With the override removed the validation error is gone entirely.
+
+The dome still does not appear. Six attempts, each narrowing it, and the remaining question is
+now inside Bevy's own material extraction rather than in our code:
+`Mat6orialPlugin::<SkyMaterial>` + `NoFrustumCulling` + a 9,000-unit mesh, against a water
+material that differs only in having a texture binding.
+
+Stopped here for good. The sky is cosmetic, the project has a working day-night cycle behind
+it, and the two durable lessons are recorded: custom materials need the right prepass, and
+`specialize` must leave the vertex layout alone.
 
 ### 4.33 WESL, and four errors that each gave the answer
 
