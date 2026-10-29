@@ -367,7 +367,9 @@ fn setup_lighting(mut commands: Commands<'_, '_>, sky: Res<'_, Sky>) {
 #[expect(
     clippy::too_many_arguments,
     clippy::needless_pass_by_value,
-    reason = "each argument is a distinct resource the clock drives; Bevy passes them by value"
+    clippy::type_complexity,
+    reason = "each argument is a distinct resource the clock drives; the query filters must be \
+              disjoint because both systems take &mut Transform; Bevy passes parameters by value"
 )]
 fn advance_clock(
     time: Res<'_, Time>,
@@ -375,9 +377,14 @@ fn advance_clock(
     mut sky: ResMut<'_, Sky>,
     mut clear: ResMut<'_, ClearColor>,
     mut ambient: ResMut<'_, GlobalAmbientLight>,
-    mut sun: Query<'_, '_, (&mut DirectionalLight, &mut Transform), With<scene::SunLight>>,
+    mut sun: Query<
+        '_,
+        '_,
+        (&mut DirectionalLight, &mut Transform),
+        (With<scene::SunLight>, Without<world::SunDisc>),
+    >,
     mut camera: Query<'_, '_, &mut DistanceFog>,
-    mut disc: Query<'_, '_, &mut Transform, With<world::SunDisc>>,
+    mut disc: Query<'_, '_, &mut Transform, (With<world::SunDisc>, Without<scene::SunLight>)>,
 ) {
     if std::env::var_os("VC_TIME_PAUSED").is_some() {
         return;
