@@ -18,7 +18,8 @@ use bevy::camera::visibility::VisibilityRange;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use vc_physics::{Placement as PhysicsPlacement, StaticWorld};
-use vc_render::{to_bevy_position, water_material};
+use vc_render::to_bevy_position;
+use vc_render::water::{WaterMaterial, WaterParams, WaterSurface};
 
 use crate::camera::FlyCamMarker;
 use crate::sky::Sky;
@@ -857,7 +858,7 @@ pub fn spawn_water(
     commands: &mut Commands<'_, '_>,
     streamer: &mut Streamer,
     textures: &mut TextureCache,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<WaterMaterial>,
     meshes: &mut Assets<Mesh>,
     images: &mut Assets<Image>,
     sky: &Sky,
@@ -868,19 +869,31 @@ pub fn spawn_water(
         return;
     };
     textures.upload_batch(std::slice::from_ref(&texture), images);
-    let material = water_material(
-        sky.water,
-        textures.handle(&texture).unwrap_or_default(),
-        materials,
-    );
+    let water = sky.water.to_linear();
+    let clear = sky.clear.to_linear();
+    let material = materials.add(WaterMaterial {
+        ripples: textures.handle(&texture),
+        params: WaterParams {
+            time: 0.0,
+            deep: Vec4::new(water.red, water.green, water.blue, 1.0),
+            shallow: Vec4::new(water.red * 1.7, water.green * 1.8, water.blue * 1.6, 1.0),
+            sky: Vec4::new(clear.red, clear.green, clear.blue, 1.0),
+            sun: {
+                let light = sky.sun_direction();
+
+                Vec4::new(light.x, light.y, light.z, 1.0)
+            },
+        },
+    });
 
     commands.spawn((
         Mesh3d(meshes.add(water_mesh())),
-        MeshMaterial3d(material),
+        MeshMaterial3d(material.clone()),
         Transform::IDENTITY,
         NotShadowCaster,
+        WaterSurface(material),
     ));
-    println!("water: quad at 6, tinted from timecyc");
+    println!("water: quad at 6, rippled");
 }
 
 fn water_mesh() -> Mesh {

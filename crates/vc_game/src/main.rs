@@ -8,6 +8,7 @@
 use std::error::Error;
 
 use bevy::prelude::*;
+use vc_render::water::{WaterMaterial, WaterPlugin};
 use vc_render::{MaterialCache, TextureCache, to_bevy_position};
 use vc_stream::{Colliders, Streamer};
 use vc_transport::{GameRoot, ImageArchive};
@@ -68,6 +69,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             ..default()
         }))
         .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
+        .add_plugins(WaterPlugin)
         .insert_resource(ClearColor(sky.clear))
         .insert_resource(sky)
         .insert_resource(plan)
@@ -268,6 +270,7 @@ fn setup_world(
     mut source: ResMut<'_, Source>,
     plan: Res<'_, WorldPlan>,
     cell: Res<'_, StartCell>,
+    mut water: ResMut<'_, Assets<WaterMaterial>>,
     mut start: ResMut<'_, StartShot>,
     colliders: Res<'_, ColliderSet>,
     mut physics: ResMut<'_, Physics>,
@@ -320,7 +323,7 @@ fn setup_world(
         &mut commands,
         &mut source.0,
         &mut textures,
-        &mut standard,
+        &mut water,
         &mut meshes,
         &mut images,
         &sky,

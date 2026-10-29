@@ -17,6 +17,7 @@ use vc_game::camera::{FlyCam, Physics, Player};
 use vc_game::scene;
 use vc_game::sky::Sky;
 use vc_game::world::{self, WorldPlan};
+use vc_render::water::WaterMaterial;
 use vc_render::{MaterialCache, TextureCache};
 use vc_stream::{Colliders, Streamer};
 use vc_transport::{GameRoot, ImageArchive};
@@ -86,6 +87,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .disable::<WinitPlugin>(),
     )
     .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_millis(16)))
+    .add_plugins(vc_render::water::WaterPlugin)
     .insert_resource(ClearColor(sky.clear))
     .insert_resource(sky)
     .insert_resource(plan)
@@ -138,6 +140,7 @@ fn setup_world(
     mut materials: ResMut<'_, MaterialCache>,
     mut meshes: ResMut<'_, Assets<Mesh>>,
     mut standard: ResMut<'_, Assets<StandardMaterial>>,
+    mut water: ResMut<'_, Assets<WaterMaterial>>,
     mut images: ResMut<'_, Assets<Image>>,
 ) {
     let baked = world::bake(
@@ -169,7 +172,7 @@ fn setup_world(
             &mut commands,
             &mut source.0,
             &mut textures,
-            &mut standard,
+            &mut water,
             &mut meshes,
             &mut images,
             &sky,

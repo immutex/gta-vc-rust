@@ -14,6 +14,8 @@
     deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
+pub mod water;
+
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
