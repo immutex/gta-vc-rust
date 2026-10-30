@@ -162,6 +162,29 @@ to anywhere you like. The optional hour sets the starting time; `21` has the str
 | `VC_TIME_PAUSED` | hold the hour still |
 | `VC_NO_AA` | switch antialiasing off, to measure its cost |
 | `VC_NO_WATER` | skip the ocean, for inspecting geometry |
+| `VC_SENSE` | `stored` or `conjugated` rotation sense at startup |
+
+### Diagnostics
+
+These exist for narrowing down a rendering bug, and they are worth trying before reporting
+one. Each turns part of the scene off so the rest can be looked at.
+
+| Variable | Effect |
+|---|---|
+| `VC_NO_TEXTURES` | draw everything white, so a dark area can be told apart from a dark texture |
+| `VC_NO_SHADOWS` | disable shadow maps |
+| `VC_NO_SHADOW_MODELS` | drop the baked shadow quads the map ships |
+| `VC_KEEP_ALL` | keep every placement, including LOD shells and interiors |
+| `VC_ONLY_GROUND` | draw only road, pavement and terrain models |
+| `VC_TEXTURE_REPORT` | print textures that share a name at different sizes |
+| `VC_REPORT_ISLANDS` | print island shell placement details |
+
+The offscreen capture takes its own camera:
+
+| Variable | Effect |
+|---|---|
+| `VC_SHOT_EYE` | camera position, as `x,y,z` |
+| `VC_SHOT_TARGET` | look-at point, as `x,y,z` |
 
 ## Development
 
