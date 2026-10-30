@@ -101,9 +101,14 @@ impl Placement {
     }
 }
 
+/// `1 / value`, or zero for a scale small enough to divide by.
+///
+/// Returning the value instead of its inverse is a mistake that hides on this map: almost
+/// every placement is unit-scaled, where the two agree. Any model with a non-uniform scale
+/// gets normals tilted the wrong way, which reads as a surface lit from the wrong side.
 fn reciprocal(value: f32) -> f32 {
     if value.abs() > f32::EPSILON {
-        value
+        value.recip()
     } else {
         0.0
     }
@@ -390,25 +395,6 @@ impl MaterialCache {
     }
 }
 
-/// A blended, lightly reflective surface for the ocean.
-pub fn water_material(
-    tint: Color,
-    texture: Handle<Image>,
-    materials: &mut Assets<StandardMaterial>,
-) -> Handle<StandardMaterial> {
-    materials.add(StandardMaterial {
-        base_color: tint,
-        base_color_texture: Some(texture),
-        alpha_mode: AlphaMode::Blend,
-        perceptual_roughness: 0.08,
-        metallic: 0.0,
-        reflectance: 0.3,
-        cull_mode: None,
-        double_sided: true,
-        ..StandardMaterial::default()
-    })
-}
-
 #[derive(Clone, Copy)]
 struct Vertex {
     position: Vec3,
@@ -677,6 +663,24 @@ mod tests {
 
         // East turned north: north is -Z in Bevy, and the city must not mirror.
         assert!((east - Vec3::new(0.0, 0.0, -1.0)).length() < 1e-5, "{east}");
+    }
+
+    /// A normal on a stretched surface must tilt away from the stretched axis, which is
+    /// what the inverse transpose does. Multiplying by the scale instead tilts it the
+    /// wrong way, and unit-scaled placements cannot tell the two apart.
+    #[test]
+    fn tilts_normals_away_from_a_stretched_axis() {
+        let placement = Placement::new([0.0; 3], [0.0, 0.0, 0.0, 1.0], [2.0, 1.0, 1.0]);
+        let diagonal = Vec3::new(1.0, 1.0, 0.0).normalize();
+        let (_, normal) = placement.apply(Vec3::ZERO, diagonal);
+
+        // Inverse transpose of scale (2,1,1) is (0.5,1,1); normalised that is
+        // (0.447, 0.894, 0), and the axis change puts it at (0.447, 0, -0.894).
+        let expected = Vec3::new(0.447_213_6, 0.0, -0.894_427_2);
+        assert!(
+            (normal - expected).length() < 1e-5,
+            "normal {normal} should be {expected}"
+        );
     }
 
     /// A quad whose texture coordinates follow the geometry: `u` along the game's x and

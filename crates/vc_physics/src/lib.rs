@@ -227,14 +227,16 @@ impl StaticWorld {
             // A downward ray meets the top of a box, which is where the street is on the
             // models built from boxes. Without this the player falls through them.
             for solid in &collider.boxes {
-                let low = placement.transform(solid.min);
-                let high = placement.transform(solid.max);
-                let top = low[2].max(high[2]);
-                let floor = low[2].min(high[2]);
-                let inside = point[0] >= low[0].min(high[0])
-                    && point[0] <= low[0].max(high[0])
-                    && point[1] >= low[1].min(high[1])
-                    && point[1] <= low[1].max(high[1]);
+                // All eight corners, not two: a rotated box's opposite corners do not
+                // describe its extent, and taking them as one shrinks the surface the
+                // player can stand on.
+                let (low, high) = box_bounds(placement, solid);
+                let top = high[2];
+                let floor = low[2];
+                let inside = point[0] >= low[0]
+                    && point[0] <= high[0]
+                    && point[1] >= low[1]
+                    && point[1] <= high[1];
 
                 if inside && point[2] >= top && point[2] - top <= depth {
                     best = Some(best.map_or(top, |found| found.max(top)));
@@ -301,6 +303,14 @@ impl StaticWorld {
                 continue;
             };
 
+            for solid in &collider.boxes {
+                let (low, high) = box_bounds(placement, solid);
+
+                if let Some(hit) = ray_box(point, direction, reach, low, high) {
+                    nearest = nearest.min(hit);
+                }
+            }
+
             for face in &collider.faces {
                 let Some(a) = collider.vertices.get(usize::from(face.indices[0])) else {
                     continue;
@@ -353,6 +363,84 @@ impl StaticWorld {
             .filter_map(|index| self.instances.get(index as usize))
             .collect()
     }
+}
+
+/// The world-space axis-aligned bounds of a box, over all eight corners.
+fn box_bounds(placement: &Placement, solid: &vc_col::Box3) -> ([f32; 3], [f32; 3]) {
+    let mut low = [f32::INFINITY; 3];
+    let mut high = [f32::NEG_INFINITY; 3];
+
+    for corner in 0..8u8 {
+        let point = [
+            if corner & 1 == 0 {
+                solid.min[0]
+            } else {
+                solid.max[0]
+            },
+            if corner & 2 == 0 {
+                solid.min[1]
+            } else {
+                solid.max[1]
+            },
+            if corner & 4 == 0 {
+                solid.min[2]
+            } else {
+                solid.max[2]
+            },
+        ];
+        let world = placement.transform(point);
+
+        for axis in 0..3 {
+            low[axis] = low[axis].min(world[axis]);
+            high[axis] = high[axis].max(world[axis]);
+        }
+    }
+
+    (low, high)
+}
+
+/// Slab test: the distance along `direction` to entering the box, if it is hit at all.
+fn ray_box(
+    origin: [f32; 3],
+    direction: [f32; 3],
+    reach: f32,
+    low: [f32; 3],
+    high: [f32; 3],
+) -> Option<f32> {
+    let mut enter = 0.0f32;
+    let mut exit = reach;
+
+    for axis in 0..3 {
+        let start = origin[axis];
+        let step = direction[axis];
+
+        if step.abs() < 1e-6 {
+            // Parallel to this pair of planes: either always between them or never.
+            if start < low[axis] || start > high[axis] {
+                return None;
+            }
+
+            continue;
+        }
+
+        let inverse = step.recip();
+        let near = (low[axis] - start) * inverse;
+        let far = (high[axis] - start) * inverse;
+        let (near, far) = if near <= far {
+            (near, far)
+        } else {
+            (far, near)
+        };
+
+        enter = enter.max(near);
+        exit = exit.min(far);
+
+        if enter > exit {
+            return None;
+        }
+    }
+
+    Some(enter)
 }
 
 fn cell_range(min: f32, max: f32, cell: f32) -> std::ops::RangeInclusive<i32> {
@@ -477,6 +565,82 @@ mod tests {
         );
 
         assert_eq!(world.ground([100.0, 0.0, 20.0], 20.0), Some(12.0));
+    }
+
+    /// A box two units tall, centred on the origin.
+    fn block() -> Collider {
+        Collider {
+            vertices: Vec::new(),
+            faces: Vec::new(),
+            spheres: Vec::new(),
+            boxes: vec![vc_col::Box3 {
+                min: [-1.0, -1.0, 0.0],
+                max: [1.0, 1.0, 2.0],
+                surface: 0,
+            }],
+        }
+    }
+
+    #[test]
+    fn a_box_gives_ground_at_its_top() {
+        let mut world = StaticWorld::new(25.0);
+        let collider = world.add_collider(block());
+        world.place(
+            collider,
+            Placement {
+                position: [0.0, 0.0, 0.0],
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: [1.0; 3],
+            },
+            ([-1.0, -1.0, 0.0], [1.0, 1.0, 2.0]),
+        );
+
+        assert_eq!(world.ground([0.0, 0.0, 5.0], 10.0), Some(2.0));
+    }
+
+    /// Rotated 45 degrees about z, the box's true top is still 2, but its two opposite
+    /// corners no longer span its extent, so a two-corner bound gets the width wrong.
+    #[test]
+    fn a_rotated_box_keeps_its_extent() {
+        let mut world = StaticWorld::new(25.0);
+        let collider = world.add_collider(block());
+        let angle = std::f32::consts::FRAC_PI_4;
+        world.place(
+            collider,
+            Placement {
+                position: [0.0, 0.0, 0.0],
+                rotation: [0.0, 0.0, (angle * 0.5).sin(), (angle * 0.5).cos()],
+                scale: [1.0; 3],
+            },
+            ([-2.0, -2.0, 0.0], [2.0, 2.0, 2.0]),
+        );
+
+        // The corner that reaches furthest along x is now at sqrt(2), so a point at 1.3
+        // is over the box and a point at 1.6 is not.
+        assert_eq!(world.ground([1.3, 0.0, 5.0], 10.0), Some(2.0));
+        assert_eq!(world.ground([1.6, 0.0, 5.0], 10.0), None);
+    }
+
+    #[test]
+    fn a_cast_is_stopped_by_a_box() {
+        let mut world = StaticWorld::new(25.0);
+        let collider = world.add_collider(block());
+        world.place(
+            collider,
+            Placement {
+                position: [0.0, 0.0, 0.0],
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: [1.0; 3],
+            },
+            ([-1.0, -1.0, 0.0], [1.0, 1.0, 2.0]),
+        );
+
+        // Walking east from three units away meets the face at x = -1.
+        let hit = world.cast([-3.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0);
+        assert!((hit - 2.0).abs() < 1e-4, "hit {hit} should be 2");
+
+        // Walking east from above the box passes over it.
+        assert_eq!(world.cast([-3.0, 0.0, 9.0], [1.0, 0.0, 0.0], 5.0), 5.0);
     }
 
     #[test]
