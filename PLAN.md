@@ -511,6 +511,41 @@ faults of its own before it worked - a duplicate `Msaa` panic, an HDR camera ren
 an LDR target (a faithful black PNG), and silence about both - and now reads its own output
 back and reports the mean brightness.
 
+### 4.35 The review that found four bugs by reading
+
+Five scoped passes over the tree (renderer, runtime ECS, format parsers, data pipeline and
+physics, tooling and docs) found four real defects. Three of them were invisible in play,
+which is why they had survived: each needed a non-default input to show itself.
+
+**`reciprocal` returned its argument.** `Placement::apply` scaled normals by the scale
+instead of its inverse, so any model with a non-uniform scale is lit from the wrong side.
+Every placement in Vice City is unit scaled, where the two agree, so nothing looked wrong.
+Fixed, with a test that fails on the old code.
+
+**`StaticWorld::cast` ignored box colliders.** The ground query walked boxes and the wall cast
+walked triangles, so you could stand on a box but walk through it. Vice City keeps much of its
+road, pavement and prop surface in boxes, which matches the reported fall-through. Boxes are
+slab-tested now.
+
+**`ground` built a box's extent from two opposite corners.** That is only the extent when the
+box is axis-aligned; a rotated box under-reports the surface you can stand on. All eight
+corners now.
+
+**Pressing `R` added another sun every time.** The disc was not a `BakedPart`, so the sweep
+that clears the world before a rebuild left it behind. It carries `BakedPart` now. The
+obvious fix, a second query in `flip_sense`, was not available: that system already took
+sixteen parameters, Bevy's limit, and a seventeenth silently stopped it being a system at
+all. Worth remembering when a system stops running for no stated reason.
+
+Two smaller things: the overlay allocated a `String` per frame, and `WorldPlan::new` cloned
+all 4,131 definitions on every rebuild. Both fixed.
+
+Confirmed clean: no production `unwrap`, `expect` or `panic!` anywhere; no `#[allow]`; no
+`TODO`, `dbg!` or `unimplemented!`; every parser reads through bounds-checked `get`; the
+spatial hash floors negative coordinates correctly; the texture and dictionary caches both
+remember failures instead of retrying per frame; and the test suite passes with no game
+install present, which is what CI has.
+
 ### 4.34 A day-night cycle, and where the sky dome stands
 
 The hour used to be fixed at startup. A `Clock` now advances it - one game hour per real
