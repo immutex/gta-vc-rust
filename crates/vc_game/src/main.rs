@@ -37,7 +37,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (world, effects) = world::load(&root.path().join("data/maps"))?;
     let sense = world::Sense::from_env();
     println!("rotation sense: {}", sense.label());
-    let plan = WorldPlan::new(world.clone(), &effects, sense);
+    let plan = WorldPlan::new(&world, &effects, sense);
     println!(
         "world: {} placements ({} LOD, {} interior, {} duplicate, {} unknown dropped)",
         plan.instances.len(),
@@ -88,7 +88,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .init_resource::<MaterialCache>()
         .init_resource::<Stats>()
         .init_resource::<world::ActiveLights>()
-        .insert_resource(RawWorld(world))
+        .insert_resource(RawWorld(std::sync::Arc::new(world)))
         .insert_resource(sense)
         .insert_resource(Clock {
             table: vc_game::sky::read(&root.path().join("data/timecyc.dat"))?,
@@ -107,6 +107,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         // by the camera's own required component, leaving Bevy's default 1,000-unit far
         // plane - which clips everything beyond a kilometre, sky included.
         .add_systems(PostStartup, apply_projection)
+        // The overlay only reads, so it needs no place in the chain above.
+        .add_systems(Update, hud::update)
         .add_systems(
             Update,
             (
@@ -117,7 +119,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 flip_sense,
                 vc_game::camera::fly,
                 vc_game::camera::walk,
-                hud::update,
             )
                 .chain(),
         )
@@ -197,7 +198,7 @@ fn flip_sense(
         commands.entity(entity).despawn();
     }
 
-    *plan = WorldPlan::new(raw.0.clone(), &effects.0, *sense);
+    *plan = WorldPlan::new(&raw.0, &effects.0, *sense);
     *physics = Physics(vc_physics::StaticWorld::new(world::PHYSICS_BUCKET));
 
     let baked = world::bake(
@@ -225,9 +226,9 @@ struct StartShot {
 /// The loaded map before filtering, kept so the plan can be rebuilt under the other
 /// rotation sense without re-reading the disk.
 #[derive(Resource)]
-struct RawWorld(vc_world::World);
+struct RawWorld(std::sync::Arc<vc_world::World>);
 
-/// Command-line start cell and hour.
+/// The streaming source, holding the archives open.
 #[derive(Resource)]
 struct Source(Streamer);
 

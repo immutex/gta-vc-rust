@@ -123,11 +123,13 @@ impl WorldPlan {
         clippy::too_many_lines,
         reason = "the filter, the chunk assignment and the light collection read better together than apart"
     )]
-    pub fn new(world: World, effects: &[vc_world::Effect], sense: Sense) -> Self {
+    pub fn new(world: &World, effects: &[vc_world::Effect], sense: Sense) -> Self {
+        // Borrowed rather than moved out: the caller keeps the parsed world so a rebuild
+        // under the other rotation sense does not read the disk again.
         let definitions: HashMap<u32, ObjectDefinition> = world
             .definitions
-            .into_iter()
-            .map(|definition| (definition.id, definition))
+            .iter()
+            .map(|definition| (definition.id, definition.clone()))
             .collect();
 
         let lod: Vec<&Instance> = world
@@ -898,6 +900,8 @@ pub fn spawn_sun_disc(
             Transform::from_translation(sky.sun_direction() * SUN_DISTANCE),
             NotShadowCaster,
             SunDisc,
+            // Swept with the rest of the world when the rotation sense is rebuilt.
+            BakedPart,
         ))
         .id();
 
@@ -1032,7 +1036,7 @@ mod tests {
     #[test]
     fn keeps_a_shell_that_has_no_detail_counterpart() {
         let plan = WorldPlan::new(
-            world(vec![instance(2, "LODroad", 0, [0.0; 3])]),
+            &world(vec![instance(2, "LODroad", 0, [0.0; 3])]),
             &[],
             Sense::Conjugated,
         );
@@ -1044,7 +1048,7 @@ mod tests {
     #[test]
     fn drops_a_shell_that_duplicates_detail_geometry() {
         let plan = WorldPlan::new(
-            world(vec![
+            &world(vec![
                 instance(1, "road", 0, [0.0; 3]),
                 instance(2, "LODroad", 0, [0.0; 3]),
             ]),
@@ -1060,7 +1064,7 @@ mod tests {
     #[test]
     fn rescues_an_outdoor_placement_tagged_with_an_interior() {
         let plan = WorldPlan::new(
-            world(vec![
+            &world(vec![
                 instance(1, "road", 13, [10.0, 20.0, 5.0]),
                 instance(2, "LODroad", 0, [10.0, 20.0, 5.0]),
             ]),
@@ -1075,7 +1079,7 @@ mod tests {
     #[test]
     fn drops_a_real_interior() {
         let plan = WorldPlan::new(
-            world(vec![instance(1, "road", 4, [10.0, 20.0, 5.0])]),
+            &world(vec![instance(1, "road", 4, [10.0, 20.0, 5.0])]),
             &[],
             Sense::Conjugated,
         );
@@ -1089,7 +1093,7 @@ mod tests {
         let mut instance = instance(1, "road", 0, [0.0; 3]);
         instance.rotation = [0.0, 0.0, 0.707_106_77, 0.707_106_77];
 
-        let plan = WorldPlan::new(world(vec![instance]), &[], Sense::Conjugated);
+        let plan = WorldPlan::new(&world(vec![instance]), &[], Sense::Conjugated);
 
         assert_eq!(plan.instances[0].rotation[2], -0.707_106_77);
         assert_eq!(plan.instances[0].rotation[3], 0.707_106_77);

@@ -1,6 +1,8 @@
 //! The diagnostics overlay.
 
 use bevy::diagnostic::{Diagnostic, DiagnosticsStore, FrameTimeDiagnosticsPlugin};
+use std::fmt::Write as _;
+
 use bevy::prelude::*;
 
 use crate::camera::FlyCamMarker;
@@ -75,7 +77,11 @@ pub fn update(
             .unwrap_or_else(|| ("none".to_owned(), 0.0));
     }
 
-    text.0 = format!(
+    // Reused rather than reassigned: this runs every frame and a fresh `String` per frame
+    // is a measurable share of the main thread at these frame rates.
+    text.0.clear();
+    let _ = write!(
+        text.0,
         "{:5.1} fps  {:5.2} ms  sense {}\n{} chunks  {} draws  {} tris\n{} k verts  {} textures  {} failed\nat {:.0} {:.0} {:.0}\nnear {} at {:.0} m",
         smoothed(&FrameTimeDiagnosticsPlugin::FPS),
         smoothed(&FrameTimeDiagnosticsPlugin::FRAME_TIME),
